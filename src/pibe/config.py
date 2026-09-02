@@ -32,6 +32,11 @@ class ArchitectureConfig:
         :math:`\mathcal{Q}_k`.
     activation
         Must be twice continuously differentiable, per Eq. (21).
+    time_fourier_features
+        Number of harmonics lifting the decoder's time input; ``0`` disables
+        it.  See :class:`~pibe.nets.decoder.FourierTimeFeatures` --- it exists
+        because disturbance recovery is limited by how well the *first*
+        coordinate is resolved, not by network width.
     """
 
     latent_dim: int = 32
@@ -39,8 +44,14 @@ class ArchitectureConfig:
     decoder_hidden: tuple[int, ...] = (64, 64, 64)
     head_hidden: tuple[int, ...] = (64, 64)
     activation: str = "tanh"
+    time_fourier_features: int = 0
 
     def __post_init__(self) -> None:
+        if self.time_fourier_features < 0:
+            raise ValueError(
+                "time_fourier_features must be non-negative, got "
+                f"{self.time_fourier_features}"
+            )
         if self.latent_dim < 1:
             raise ValueError(f"latent_dim must be positive, got {self.latent_dim}")
         self.encoder_hidden = tuple(self.encoder_hidden)
@@ -194,6 +205,57 @@ class TrainingConfig:
     lr_local, lr_global
         Learning rates for the two phases; fine-tuning perturbs already-trained
         upstream cells and is usually given the smaller rate.
+    local_only
+        Ablation: skip end-to-end fine-tuning entirely and train every cell
+        with its own :math:`\mathcal{L}^k_{Loc}` against frozen upstream cells.
+        This *departs from Algorithm 1*, which always runs a global phase.
+
+        It is worth having because the global loss (27) weights the current
+        cell by 1 and cell 2 by :math:`e^{-(k-2)/k}`, while cell 2's data term
+        (23) is the only one comparing against a *measurement*: every other
+        data term is a consistency penalty between two estimates, satisfiable
+        by the whole chain drifting together.  Down-weighting the sole anchor
+        can therefore trade a real measurement fit for mutual agreement.
+        Freezing upstream removes that freedom --- in particular it pins the
+        final cell's auxiliary state to its consistency target, leaving
+        :math:`\hat a` as the only free variable in the last residual.
+
+        When ``True``, ``n_par`` is ignored.
+    final_global_iters
+        Extra end-to-end iterations appended to the *final* cell's global
+        phase.  This cell is the only place the bank closes: at every other
+        cell the residual
+        :math:`\dot{\hat x}_{k-1} = \hat x_k + f_{k-1}(\cdot,\hat\theta_{k-1})`
+        has two unknowns and one equation, a one-parameter family the local
+        loss cannot resolve (Remark 7).  At cell :math:`n+1` the auxiliary
+        state is pinned by its consistency target and :math:`\hat a` must fit
+        the last residual over the whole horizon --- over-determined, hence
+        identifying.  Since that information reaches cells :math:`2..n` only
+        through :math:`\mathcal{L}^{n+1}_{Tot}`, this phase deserves most of
+        the budget.
+    joint
+        Ablation: skip the outer loop over cells and train the whole bank at
+        once against :math:`\mathcal{L}^{n+1}_{Tot}`.
+
+        Motivated by where the bank actually closes.  Under Algorithm 1 cells
+        :math:`2..n` are trained to convergence *before* cell :math:`n+1`
+        exists, and each of them faces a one-equation/two-unknown residual
+        (Remark 7), so each commits to an arbitrary point of its degenerate
+        family.  The final cell's residual --- the only over-determined one,
+        and hence the only thing that can pick within those families --- then
+        arrives too late, and its information has to travel back up a chain
+        that has already settled.  Training jointly lets that constraint act
+        from the first step.
+
+        Incompatible with ``local_only``.
+    lr_schedule
+        ``"none"`` keeps the phase learning rate fixed; ``"cosine"`` anneals it
+        to zero over the remaining iterations of the phase.  Annealing matters
+        for this objective because the physics residual differentiates the
+        decoder in ``t``: a late-training step large enough to perturb the
+        fitted trajectory perturbs its derivative far more, so a fixed rate
+        leaves the loss bouncing on a noise floor set by the step size rather
+        than by the measurement noise.
     """
 
     n_total: int = 4000
@@ -207,9 +269,23 @@ class TrainingConfig:
     grad_clip: float | None = 1.0
     log_every: int = 200
     seed: int = 0
+    local_only: bool = False
+    joint: bool = False
+    lr_schedule: str = "none"
+    final_global_iters: int = 0
 
     def __post_init__(self) -> None:
-        if not 0 < self.n_par < self.n_total:
+        if self.lr_schedule not in ("none", "cosine"):
+            raise ValueError(
+                f"lr_schedule must be 'none' or 'cosine', got {self.lr_schedule!r}"
+            )
+        if self.n_total < 1:
+            raise ValueError(f"n_total must be positive, got {self.n_total}")
+        # Algorithm 1's requirement, waived for the local-only ablation which
+        # deliberately has no global phase.
+        if self.joint and self.local_only:
+            raise ValueError("joint and local_only are mutually exclusive")
+        if not self.local_only and not 0 < self.n_par < self.n_total:
             raise ValueError(
                 f"Algorithm 1 requires 0 < n_par < n_total, "
                 f"got n_par={self.n_par}, n_total={self.n_total}"

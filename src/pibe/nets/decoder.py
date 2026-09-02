@@ -28,6 +28,7 @@ its time derivative (21)/(36) is taken by automatic differentiation with
 
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
 
 import torch
@@ -36,6 +37,59 @@ from torch import Tensor, nn
 from pibe.nets.mlp import MLP
 from pibe.nets.normalization import normalize_time
 from pibe.nets.reparam import make_output_map
+
+
+class FourierTimeFeatures(nn.Module):
+    r"""Lift normalized time into ``[t, sin(k pi t), cos(k pi t)]_{k=1..K}``.
+
+    A plain MLP in :math:`t` has a well-known spectral bias: it fits smooth,
+    low-frequency shapes long before oscillatory ones.  That matters here
+    beyond fit quality.  The disturbance reaches the measured output only
+    through the full chain, so recovering it amounts to differentiating
+    :math:`y` :math:`n` times; an under-resolved :math:`\hat x_1` therefore
+    destroys :math:`\hat d` even when its own error looks small.  Giving the
+    decoder an explicit oscillatory basis removes that bottleneck.
+
+    Every feature is :math:`C^\infty`, so Eq. (21)'s requirement that the
+    decoder be twice continuously differentiable in :math:`t` still holds, and
+    the harmonics are of the *horizon*, so a disturbance at :math:`\Omega` with
+    an integer number of periods over :math:`[0,T]` is represented exactly.
+
+    Parameters
+    ----------
+    n_features
+        Number of harmonics ``K``.  ``0`` disables the lift entirely.
+    """
+
+    def __init__(self, n_features: int) -> None:
+        super().__init__()
+        if n_features < 0:
+            raise ValueError(f"n_features must be non-negative, got {n_features}")
+        self.n_features = int(n_features)
+        if self.n_features:
+            # Stored as exact integers, with pi applied in the working dtype at
+            # call time.  Baking pi into a buffer built at the default dtype
+            # would round the harmonics to float32 and survive an upcast to
+            # float64 as a ~1e-7 error in every phase.
+            self.register_buffer(
+                "harmonics",
+                torch.arange(1, self.n_features + 1, dtype=torch.float64),
+            )
+
+    @property
+    def out_dim(self) -> int:
+        """Width of the lifted time input."""
+        return 1 + 2 * self.n_features
+
+    def forward(self, t_scaled: Tensor) -> Tensor:
+        """``t_scaled`` in ``[-1, 1]``, shape ``(..., 1)`` -> ``(..., out_dim)``."""
+        if not self.n_features:
+            return t_scaled
+        phase = t_scaled * (math.pi * self.harmonics.to(t_scaled.dtype))
+        return torch.cat([t_scaled, torch.sin(phase), torch.cos(phase)], dim=-1)
+
+    def extra_repr(self) -> str:  # pragma: no cover - trivial
+        return f"n_features={self.n_features}, out_dim={self.out_dim}"
 
 
 class StateDecoder(nn.Module):
@@ -63,6 +117,7 @@ class StateDecoder(nn.Module):
         t_end: float = 1.0,
         hidden: Sequence[int] = (64, 64, 64),
         activation: str = "tanh",
+        time_fourier_features: int = 0,
     ) -> None:
         super().__init__()
         output_bounds = torch.as_tensor(output_bounds)
@@ -75,8 +130,9 @@ class StateDecoder(nn.Module):
         self.t_start = float(t_start)
         self.t_end = float(t_end)
 
+        self.time_features = FourierTimeFeatures(time_fourier_features)
         self.net = MLP(
-            in_dim=1 + self.latent_dim,
+            in_dim=self.time_features.out_dim + self.latent_dim,
             out_dim=self.out_dim,
             hidden=hidden,
             activation=activation,
@@ -111,7 +167,7 @@ class StateDecoder(nn.Module):
                 f"batch mismatch between t ({t.shape[0]}) and z ({z.shape[0]})"
             )
 
-        t_scaled = normalize_time(t, self.t_start, self.t_end)
+        t_scaled = self.time_features(normalize_time(t, self.t_start, self.t_end))
         z_expanded = z.unsqueeze(1).expand(-1, t.shape[1], -1)
         features = torch.cat([t_scaled, z_expanded], dim=-1)
         return self.output_map(self.net(features))

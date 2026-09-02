@@ -21,3 +21,6 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "slow: randomised sweeps over many simulated trajectories (deselect with -m 'not slow')",
+]

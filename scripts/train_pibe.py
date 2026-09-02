@@ -24,6 +24,7 @@ if str(REPO_ROOT / "src") not in sys.path:  # allow running without installing
 
 from pibe.config import RunConfig  # noqa: E402
 from pibe.eval.metrics import compute_metrics  # noqa: E402
+from pibe.eval.oracle import compare_to_oracle  # noqa: E402
 from pibe.experiment import build_experiment  # noqa: E402
 from pibe.training.callbacks import save_checkpoint  # noqa: E402
 from pibe.utils.logging import get_logger, setup_logging  # noqa: E402
@@ -112,6 +113,18 @@ def main() -> int:
         logger.info("%s metrics:\n%s", label, metrics.summary())
         with open(output_dir / f"metrics_{label}.json", "w") as handle:
             json.dump(metrics.as_dict(), handle, indent=2)
+
+    # Score the exact solution on the same objective, so a poor result is
+    # attributed to optimization or to the loss rather than left ambiguous.
+    comparison = compare_to_oracle(
+        bank=experiment.bank,
+        disturbance=experiment.disturbance,
+        data=experiment.train_data,
+        t_coll=experiment.t_coll,
+        lam=config.training.lam,
+        noise_floor=getattr(experiment.noise, "variance", None),
+    )
+    logger.info("oracle comparison (train):\n%s", comparison.summary())
 
     logger.info("artifacts written to %s", output_dir)
     return 0

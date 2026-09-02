@@ -108,7 +108,8 @@ def test_dimensions_and_admissible_sets() -> None:
     assert system.x0_bounds.tolist() == [
         [-0.8, 0.8], [-0.5, 0.5], [-0.4, 0.4], [-0.3, 0.3]
     ]
-    assert system.theta_bounds.tolist() == [[-0.25, 0.25]] * 3
+    # Theta_j is deliberately wider than the sampling range.
+    assert system.theta_bounds.tolist() == [[-0.4, 0.4]] * 3
 
 
 def test_sampled_parameters_lie_in_their_box() -> None:
@@ -126,6 +127,25 @@ def test_sampled_parameters_lie_in_their_box() -> None:
         AutomaticaN4System(theta_seed=3).theta_true,
         AutomaticaN4System(theta_seed=4).theta_true,
     )
+
+
+def test_true_parameters_stay_clear_of_the_admissible_boundary() -> None:
+    r"""The truth must be interior to :math:`\Theta_j`, not on its edge.
+
+    The parameter head is a tanh reparameterization onto :math:`\Theta_j`.  A
+    target at the boundary is only reachable in the saturated limit, where the
+    gradient vanishes and the estimate pins to the edge permanently.  Keeping
+    the sampling range strictly inside :math:`\Theta_j` bounds the required
+    pre-activation and keeps the head trainable.
+    """
+    for seed in range(8):
+        system = AutomaticaN4System(theta_seed=seed)
+        half_width = system.theta_bounds[:, 1]
+        fraction = (system.theta_true.abs() / half_width).max()
+        assert float(fraction) <= 0.7, (
+            f"seed {seed}: true theta reaches {float(fraction):.0%} of the "
+            "admissible half-width; the tanh head would saturate"
+        )
 
 
 # ----------------------------------------------------------------------
@@ -202,6 +222,7 @@ def test_trajectories_stay_inside_the_decoder_ranges() -> None:
     assert bool((margin > 0).all()), f"margins {margin.tolist()}"
 
 
+@pytest.mark.slow
 def test_empirical_maxima_reproduce_the_specification() -> None:
     r"""Randomised sweep over :math:`x_0`, :math:`\theta` and :math:`a`.
 

@@ -116,7 +116,19 @@ class PIBETrainer:
     # ------------------------------------------------------------------
 
     def train(self) -> History:
-        """Run the full procedure over cells ``2..n+1`` (lines 1-18)."""
+        """Run the full procedure over cells ``2..n+1`` (lines 1-18).
+
+        Under ``joint`` the outer loop is skipped: training the final cell in
+        the global regime already optimizes every cell ``2..n+1`` against
+        :math:`\mathcal{L}^{n+1}_{Tot}`, which is exactly joint training.
+        """
+        if self.config.joint:
+            logger.info(
+                "joint mode: training cells 2..%d together against L^%d_Tot",
+                self.bank.final_index, self.bank.final_index,
+            )
+            self.train_cell(self.bank.final_index)
+            return self.history
         for cell_index in self.bank.cell_indices:
             self.train_cell(cell_index)
         return self.history
@@ -125,20 +137,40 @@ class PIBETrainer:
         """Train one cell through both regimes (lines 2-17)."""
         config = self.config
         started = time.perf_counter()
-        logger.info(
-            "cell %d/%d: %d local iterations then %d fine-tuning iterations",
-            cell_index,
-            self.bank.final_index,
-            config.n_par,
-            config.n_total - config.n_par,
+        if config.local_only:
+            logger.info(
+                "cell %d/%d: %d local iterations (local-only ablation, "
+                "no end-to-end fine-tuning)",
+                cell_index,
+                self.bank.final_index,
+                config.n_total,
+            )
+        else:
+            logger.info(
+                "cell %d/%d: %d local iterations then %d fine-tuning iterations",
+                cell_index,
+                self.bank.final_index,
+                config.n_par,
+                config.n_total - config.n_par,
+            )
+
+        # The final cell's global phase closes the identification for the
+        # whole bank, so it may be given extra iterations.
+        total_iterations = config.n_total + (
+            config.final_global_iters
+            if cell_index == self.bank.final_index and not config.local_only
+            else 0
         )
 
         optimizer: torch.optim.Optimizer | None = None
+        scheduler: torch.optim.lr_scheduler.LRScheduler | None = None
         active: list[torch.nn.Parameter] = []
         current_mode: Mode | None = None
 
-        for iteration in range(config.n_total):
-            mode = mode_for_iteration(iteration, config.n_par)
+        for iteration in range(total_iterations):
+            mode = mode_for_iteration(
+                iteration, config.n_par, local_only=config.local_only
+            )
             if mode is not current_mode:
                 # Phase boundary: reset the freeze flags and build an optimizer
                 # over the newly active parameter block.
@@ -147,6 +179,13 @@ class PIBETrainer:
                     active,
                     lr=config.lr_local if mode is Mode.LOCAL else config.lr_global,
                     weight_decay=config.weight_decay,
+                )
+                scheduler = (
+                    torch.optim.lr_scheduler.CosineAnnealingLR(
+                        optimizer, T_max=max(1, total_iterations - iteration)
+                    )
+                    if config.lr_schedule == "cosine"
+                    else None
                 )
                 current_mode = mode
                 logger.debug(
@@ -158,9 +197,11 @@ class PIBETrainer:
 
             assert optimizer is not None
             result = self.step(cell_index, mode, optimizer, active)
+            if scheduler is not None:
+                scheduler.step()
 
             if config.log_every > 0 and (
-                iteration % config.log_every == 0 or iteration == config.n_total - 1
+                iteration % config.log_every == 0 or iteration == total_iterations - 1
             ):
                 self.history.log_iteration(
                     IterationRecord(

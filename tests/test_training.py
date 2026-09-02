@@ -178,3 +178,118 @@ def test_validation_does_not_leak_gradients() -> None:
     loss = trainer.evaluate(2, experiment.val_data)
     assert not loss.local.requires_grad
     assert torch.isfinite(loss.local)
+
+
+# ----------------------------------------------------------------------
+# local-only ablation
+# ----------------------------------------------------------------------
+
+
+def test_local_only_pins_every_iteration_to_the_local_regime() -> None:
+    """The ablation never enters the global phase, whatever ``n_par`` says."""
+    for iteration in (0, 5, 500, 10_000):
+        assert mode_for_iteration(iteration, n_par=5, local_only=True) is Mode.LOCAL
+
+
+def test_local_only_waives_the_algorithm_1_cutoff_inequality() -> None:
+    """``n_par`` is meaningless without a global phase, so it is not validated."""
+    config = TrainingConfig(n_total=100, n_par=100, local_only=True)
+    assert config.local_only
+    # ... but the inequality is still enforced for the standard schedule.
+    with pytest.raises(ValueError, match="0 < n_par < n_total"):
+        TrainingConfig(n_total=100, n_par=100, local_only=False)
+
+
+def test_local_only_never_moves_upstream_weights() -> None:
+    """The point of the ablation: upstream cells stay exactly as trained.
+
+    Under the global loss (27) the sole measurement anchor, cell 2's data term
+    (23), is down-weighted by ``exp(-(k-2)/k)`` while consistency terms keep
+    weight 1, so the chain can drift collectively.  Freezing upstream removes
+    that freedom entirely.
+    """
+    experiment = small_experiment(training={"n_total": 6, "n_par": 3, "local_only": True})
+    bank = experiment.bank
+    trainer = experiment.make_trainer()
+
+    trainer.train_cell(2)
+    before = [p.detach().clone() for p in bank.cell_parameters(2)]
+    trainer.train_cell(3)
+    after = list(bank.cell_parameters(2))
+
+    for old, new in zip(before, after):
+        assert torch.equal(old, new), (
+            "cell 2 changed while cell 3 was training under the local-only ablation"
+        )
+
+
+def test_local_only_run_completes_and_estimates() -> None:
+    experiment = small_experiment(
+        training={"n_total": 10, "n_par": 5, "local_only": True, "log_every": 0}
+    )
+    trainer = experiment.make_trainer()
+    trainer.train()
+    assert all(record.mode == "local" for record in trainer.history.iterations)
+
+    estimates = experiment.bank.estimate(
+        experiment.val_data.y, experiment.val_data.t, experiment.t_coll
+    )
+    assert torch.isfinite(estimates.d).all()
+
+
+def test_final_global_iters_extends_only_the_last_cell() -> None:
+    """The extra budget lands on cell ``n+1``, in the global regime."""
+    experiment = small_experiment(
+        training={"n_total": 6, "n_par": 3, "final_global_iters": 8, "log_every": 1}
+    )
+    trainer = experiment.make_trainer()
+    final = experiment.bank.final_index
+
+    trainer.train_cell(2)
+    trainer.train_cell(final)
+
+    assert len(trainer.history.for_cell(2)) == 6
+    assert len(trainer.history.for_cell(final)) == 14  # 6 + 8
+    extra = [r for r in trainer.history.for_cell(final) if r.iteration >= 6]
+    assert extra and all(r.mode == "global" for r in extra), (
+        "the extra final-cell iterations must all be end-to-end"
+    )
+
+
+def test_final_global_iters_ignored_under_local_only() -> None:
+    """With no global phase there is nothing to extend."""
+    experiment = small_experiment(
+        training={
+            "n_total": 5, "n_par": 3, "final_global_iters": 7,
+            "local_only": True, "log_every": 1,
+        }
+    )
+    trainer = experiment.make_trainer()
+    trainer.train_cell(experiment.bank.final_index)
+    assert len(trainer.history.for_cell(experiment.bank.final_index)) == 5
+
+
+def test_joint_mode_trains_every_cell_at_once() -> None:
+    """The whole bank is optimized against L^(n+1)_Tot from the first step."""
+    experiment = small_experiment(
+        training={"n_total": 8, "n_par": 1, "joint": True, "log_every": 1}
+    )
+    bank = experiment.bank
+    trainer = experiment.make_trainer()
+
+    before = {k: [p.detach().clone() for p in bank.cell_parameters(k)] for k in bank.cell_indices}
+    trainer.train()
+
+    # Only the final cell appears in the history: it *is* the joint objective.
+    assert {r.cell for r in trainer.history.iterations} == {bank.final_index}
+    # ... yet every cell's weights moved.
+    for k in bank.cell_indices:
+        after = list(bank.cell_parameters(k))
+        assert any(not torch.equal(o, n) for o, n in zip(before[k], after)), (
+            f"cell {k} was not trained under joint mode"
+        )
+
+
+def test_joint_and_local_only_are_mutually_exclusive() -> None:
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        TrainingConfig(n_total=10, n_par=5, joint=True, local_only=True)

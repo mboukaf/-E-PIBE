@@ -70,7 +70,18 @@ COMPANION = (0.576, 2.736, 4.76, 3.6)
 
 STATE_BOUNDS = ((-4.0, 4.0), (-1.2, 1.2), (-0.8, 0.8), (-1.2, 1.2))
 X0_BOUNDS = ((-0.8, 0.8), (-0.5, 0.5), (-0.4, 0.4), (-0.3, 0.3))
-THETA_BOUND = 0.25
+
+# The true parameters are *drawn* from U[-0.25, 0.25].
+THETA_SAMPLING_BOUND = 0.25
+# The estimator's admissible set Theta_j is deliberately wider.  These are
+# different objects: the sampling range says where the truth lies, while
+# Theta_j is a design choice constraining the parameter head.  Taking them
+# equal is actively harmful, because the head is a tanh reparameterization:
+# a true theta at 94% of the half-width needs a pre-activation of
+# atanh(0.94) ~ 1.74, and any overshoot saturates tanh, zeroing the gradient
+# and pinning the estimate to the boundary for the rest of training.  Widening
+# Theta_j keeps every admissible optimum comfortably interior.
+THETA_BOUND = 0.4
 
 # Conservative lower bounds on the parameter sensitivities, and the resulting
 # excitation constants gamma_k of Assumption 6.
@@ -91,27 +102,32 @@ class AutomaticaN4System(TriangularSystem):
         that :math:`\theta` is an unknown *constant* vector.
     theta_seed
         Seed for that draw; ignored when ``theta_true`` is given.
+    theta_bound
+        Half-width of the estimator's admissible set :math:`\Theta_j`.  Kept
+        strictly wider than the sampling range so the true parameter stays away
+        from the boundary of the head's tanh reparameterization; see
+        :data:`THETA_BOUND`.
     """
 
     def __init__(
         self,
         theta_true: Tensor | list[float] | None = None,
         theta_seed: int = 0,
+        theta_bound: float = THETA_BOUND,
         dtype: torch.dtype = torch.float64,
         **kwargs,
     ) -> None:
         state_bounds = torch.tensor(STATE_BOUNDS, dtype=dtype)
         x0_bounds = torch.tensor(X0_BOUNDS, dtype=dtype)
         theta_bounds = torch.tensor(
-            [[-THETA_BOUND, THETA_BOUND]], dtype=dtype
+            [[-theta_bound, theta_bound]], dtype=dtype
         ).expand(3, 2).clone()
 
         if theta_true is None:
+            # Drawn from the *sampling* range, not from Theta_j.
             generator = torch.Generator().manual_seed(theta_seed)
             unit = torch.rand(3, generator=generator, dtype=dtype)
-            theta_true = theta_bounds[:, 0] + unit * (
-                theta_bounds[:, 1] - theta_bounds[:, 0]
-            )
+            theta_true = THETA_SAMPLING_BOUND * (2.0 * unit - 1.0)
 
         super().__init__(
             n=4,

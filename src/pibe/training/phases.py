@@ -28,10 +28,19 @@ from torch import nn
 from pibe.core.bank import EstimatorBank, Mode
 
 
-def mode_for_iteration(iteration: int, n_par: int) -> Mode:
-    """Which regime iteration ``i`` of a cell's budget belongs to."""
+def mode_for_iteration(
+    iteration: int, n_par: int, local_only: bool = False
+) -> Mode:
+    """Which regime iteration ``i`` of a cell's budget belongs to.
+
+    ``local_only`` pins every iteration to :attr:`~pibe.core.bank.Mode.LOCAL`,
+    the ablation described in
+    :attr:`~pibe.config.TrainingConfig.local_only`.
+    """
     if iteration < 0:
         raise ValueError(f"iteration must be non-negative, got {iteration}")
+    if local_only:
+        return Mode.LOCAL
     return Mode.LOCAL if iteration < n_par else Mode.GLOBAL
 
 
