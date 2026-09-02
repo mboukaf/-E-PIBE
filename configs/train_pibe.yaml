@@ -1,0 +1,58 @@
+# PIBE training configuration (truncated-Gaussian / Gaussian case, Section 3.1).
+#
+# The system below is a PLACEHOLDER: Section 5 of the source PDF is truncated
+# before the 6th-order test system is stated, so nothing here reproduces the
+# paper's numbers. Swap `system.name` for a system registered in
+# pibe.systems.examples once the real one is available; no other section needs
+# to change.
+
+system:
+  name: sin_chain
+  kwargs:
+    n: 3              # state dimension -> cells k = 2..n+1
+    kappa: 0.3
+    state_bound: 8.0  # half-width of the admissible sets X_j (Assumption 1)
+    x0_bound: 0.5     # half-width of chi_0
+    theta_bound: 2.0  # half-width of the sets Theta_j
+
+data:
+  n_trajectories: 64  # P
+  n_samples: 128      # N, data grid on [0, T] with both endpoints
+  horizon: 5.0        # T
+  substeps: 8         # RK4 sub-steps per data interval
+  noise_sigma: 0.02   # 0 gives the noise-free case
+  noise_truncation_sigmas: 3.0   # symmetric truncation at w_bar = 3 sigma
+  train_fraction: 0.8
+  seed: 1
+
+basis:                # Gamma_q of Definition 1
+  q: 6
+  degree: 3           # m >= 2 so the basis is C^1, per Eq. (2)
+  knot_style: clamped
+  coeff_lo: -5.0      # the box A constraining the coefficient head Q_{n+1}
+  coeff_hi: 5.0
+
+architecture:
+  latent_dim: 32      # r_k
+  encoder_hidden: [128, 128]
+  decoder_hidden: [64, 64, 64]
+  head_hidden: [64, 64]
+  activation: tanh    # must be C^2: Eq. (21) differentiates the decoder in t
+
+training:
+  n_total: 4000       # N_tot, per-cell iteration budget
+  n_par: 3000         # N_par, local pre-training cutoff; 0 < N_par < N_tot
+  lam: 1.0            # physics weight lambda
+  n_collocation: 256  # N_r
+  batch_size: 16
+  lr_local: 1.0e-3    # local pre-training
+  lr_global: 2.0e-4   # end-to-end fine-tuning perturbs trained upstream cells
+  weight_decay: 0.0
+  grad_clip: 1.0
+  log_every: 200
+  seed: 0
+
+device: auto          # cuda -> mps -> cpu; note MPS has no float64
+dtype: float64
+seed: 0
+output_dir: outputs/pibe_run

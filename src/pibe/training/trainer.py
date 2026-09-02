@@ -263,9 +263,16 @@ class PIBETrainer:
             )
         optimizer.step()
 
+        # Detach before reporting: the recorded scalars must not keep the
+        # step's graph alive past the optimizer update.
+        target = losses[cell_index]
         return StepResult(
             objective=float(objective.detach()),
-            target=losses[cell_index],
+            target=CellLoss(
+                data=target.data.detach(),
+                physics=target.physics.detach(),
+                local=target.local.detach(),
+            ),
             grad_norm=grad_norm,
         )
 

@@ -93,19 +93,23 @@ class TrajectoryInputNormalizer(nn.Module):
         if bool((state_scales <= 0).any()) or bool((theta_scales <= 0).any()):
             raise ValueError("reference scales must be strictly positive")
 
-        root_n = float(self.n_samples) ** 0.5
+        # Built directly in the scales' dtype: constructing in the default
+        # float32 and upcasting afterwards would bake a ~1e-7 relative error
+        # into every weight, which is visible in a float64 run.
+        dtype = state_scales.dtype
+        root_n = torch.sqrt(torch.tensor(float(self.n_samples), dtype=dtype))
         blocks = [
             # Y block: s_y = s_{x_1}.  Then X_2, ..., X_{k-1}.
-            torch.full((self.n_samples,), 1.0 / (root_n * float(state_scales[j])))
+            (1.0 / (root_n * state_scales[j])).expand(self.n_samples)
             for j in range(k - 1)
         ]
         # Parameter blocks theta_1, ..., theta_{k-2}, one scalar each.
-        blocks.extend(
-            torch.full((1,), 1.0 / float(theta_scales[j])) for j in range(k - 2)
+        blocks.extend((1.0 / theta_scales[j]).reshape(1) for j in range(k - 2))
+        weight = (
+            torch.cat(blocks) if blocks else torch.empty(0, dtype=dtype)
         )
-        weight = torch.cat(blocks) if blocks else torch.empty(0)
         assert weight.numel() == self.input_dim, (weight.numel(), self.input_dim)
-        self.register_buffer("weight", weight.to(state_scales.dtype))
+        self.register_buffer("weight", weight.contiguous())
 
     def forward(self, u: Tensor) -> Tensor:
         """Apply the normalization to ``u`` of shape ``(..., d_{k-1})``."""

@@ -10,16 +10,22 @@ _DTYPES = {
 }
 
 
-def resolve_device(spec: str = "auto") -> torch.device:
+def resolve_device(spec: str = "auto", dtype: torch.dtype | None = None) -> torch.device:
     """Resolve a device specification.
 
-    ``"auto"`` prefers CUDA, then Apple MPS, then CPU.
+    ``"auto"`` prefers CUDA, then Apple MPS, then CPU.  When ``dtype`` is given
+    it is taken into account: MPS is skipped for float64, since the backend
+    cannot represent it and silently falling back to float32 would degrade the
+    autograd time derivatives the physics residuals are built on.  An
+    *explicit* ``"mps"`` is honoured and left for
+    :func:`check_dtype_support` to reject, so a deliberate choice fails loudly
+    rather than being quietly overridden.
     """
     if spec != "auto":
         return torch.device(spec)
     if torch.cuda.is_available():
         return torch.device("cuda")
-    if torch.backends.mps.is_available():
+    if torch.backends.mps.is_available() and dtype is not torch.float64:
         return torch.device("mps")
     return torch.device("cpu")
 

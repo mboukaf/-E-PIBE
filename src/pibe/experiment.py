@@ -95,8 +95,8 @@ def build_noise(config: RunConfig) -> NoiseModel:
 def build_experiment(config: RunConfig) -> Experiment:
     """Build every component of a run from its configuration."""
     seed_everything(config.seed)
-    device = resolve_device(config.device)
     dtype = resolve_dtype(config.dtype)
+    device = resolve_device(config.device, dtype=dtype)
     check_dtype_support(device, dtype)
 
     # --- system -------------------------------------------------------

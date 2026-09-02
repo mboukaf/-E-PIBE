@@ -21,6 +21,15 @@ which is smooth (so the decoder stays :math:`C^2` in :math:`t`, as Eq. (21)
 requires), surjective onto the open interval, and has bounded derivative
 :math:`r`, contributing the factor picked up by the output-scale term in the
 Lipschitz constants :math:`L_{\mathcal{S}_k}, L_{\mathcal{Q}_k}` of (75).
+
+One numerical caveat: for :math:`|z| \gtrsim 19` in float64, ``tanh``
+saturates to exactly :math:`\pm 1`, so the output attains the boundary and its
+derivative is exactly zero.  A cell driven into saturation therefore stops
+receiving gradient on that coordinate.  This is not reachable from ordinary
+training dynamics, but it is the failure mode to look for if a state or
+parameter estimate pins to the edge of its admissible interval and stays
+there --- the usual cause is admissible bounds that are too tight for the true
+trajectory, which also violates Assumption 1.
 """
 
 from __future__ import annotations
