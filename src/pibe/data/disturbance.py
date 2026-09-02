@@ -20,7 +20,7 @@ from collections.abc import Callable
 import torch
 from torch import Tensor
 
-from pibe.basis.bspline import BSplineBasis
+from pibe.basis.base import DisturbanceBasis
 
 
 class BasisDisturbance:
@@ -40,7 +40,7 @@ class BasisDisturbance:
 
     def __init__(
         self,
-        basis: BSplineBasis,
+        basis: DisturbanceBasis,
         coefficients: Tensor,
         remainder: Callable[[Tensor], Tensor] | None = None,
     ) -> None:
@@ -80,16 +80,69 @@ class BasisDisturbance:
 
 
 def sample_coefficients(
-    basis: BSplineBasis,
-    bounds: tuple[float, float],
+    basis: DisturbanceBasis,
+    bounds: Tensor | tuple[float, float],
     generator: torch.Generator | None = None,
 ) -> Tensor:
-    r"""Draw ``a`` uniformly from the box :math:`\mathcal{A} = [\text{lo}, \text{hi}]^q`."""
-    lo, hi = bounds
-    if not hi > lo:
-        raise ValueError(f"require lo < hi for the coefficient box, got {bounds}")
+    r"""Draw ``a`` uniformly from the box :math:`\mathcal{A}`.
+
+    Parameters
+    ----------
+    basis
+        Supplies ``q``, the dtype and the device.
+    bounds
+        Either a ``(q, 2)`` tensor of per-component ``(lo, hi)`` pairs, or a
+        single ``(lo, hi)`` pair applied to every coefficient.
+    """
+    if isinstance(bounds, tuple):
+        low, high = bounds
+        if not high > low:
+            raise ValueError(f"require lo < hi for the coefficient box, got {bounds}")
+        box = torch.tensor(
+            [[low, high]], dtype=basis.dtype, device=basis.device
+        ).expand(basis.q, 2)
+    else:
+        box = torch.as_tensor(bounds, dtype=basis.dtype, device=basis.device)
+        if box.shape != (basis.q, 2):
+            raise ValueError(
+                f"coefficient bounds must have shape ({basis.q}, 2), "
+                f"got {tuple(box.shape)}"
+            )
+        if bool((box[:, 0] >= box[:, 1]).any()):
+            raise ValueError("every coefficient bound must satisfy lo < hi")
+
     u = torch.rand(basis.q, generator=generator, dtype=basis.dtype, device=basis.device)
-    return lo + u * (hi - lo)
+    return box[:, 0] + u * (box[:, 1] - box[:, 0])
+
+
+class ChirpRemainder:
+    r"""The out-of-class disturbance component
+    :math:`r_q(t) = \varepsilon_{d,q}\sin(\text{rate}\cdot t^2)`.
+
+    A quadratic-phase chirp is a deliberate choice for probing model mismatch:
+    its instantaneous frequency grows without bound, so it cannot be
+    represented by a fixed finite basis at any :math:`q`.  The amplitude is
+    exactly the constant :math:`\varepsilon_{d,q}` bounding
+    :math:`\|r_q\|_{L^\infty(0,T)}` in Eq. (4), which makes it a clean knob for
+    studying how the bounds of Section 4 degrade with model mismatch.
+    """
+
+    def __init__(self, amplitude: float, rate: float = 0.15) -> None:
+        if amplitude < 0:
+            raise ValueError(f"amplitude must be non-negative, got {amplitude}")
+        self.amplitude = float(amplitude)
+        self.rate = float(rate)
+
+    def __call__(self, t: Tensor) -> Tensor:
+        return self.amplitude * torch.sin(self.rate * t**2)
+
+    @property
+    def sup_norm(self) -> float:
+        r"""The exact :math:`\varepsilon_{d,q} = \|r_q\|_{L^\infty}` bound."""
+        return self.amplitude
+
+    def __repr__(self) -> str:  # pragma: no cover - trivial
+        return f"ChirpRemainder(amplitude={self.amplitude}, rate={self.rate})"
 
 
 class FunctionDisturbance:

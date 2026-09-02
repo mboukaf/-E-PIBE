@@ -42,7 +42,7 @@ from collections.abc import Iterator
 import torch
 from torch import Tensor, nn
 
-from pibe.basis.bspline import BSplineBasis
+from pibe.basis.base import DisturbanceBasis
 from pibe.config import ArchitectureConfig
 from pibe.core.cell import CellOutput, EstimatorCell
 from pibe.core.losses import CellLoss, data_loss, local_loss, physics_loss
@@ -114,7 +114,7 @@ class EstimatorBank(nn.Module):
     def __init__(
         self,
         system: TriangularSystem,
-        basis: BSplineBasis,
+        basis: DisturbanceBasis,
         n_samples: int,
         coefficient_bounds: Tensor,
         architecture: ArchitectureConfig | None = None,

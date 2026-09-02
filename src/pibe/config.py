@@ -52,24 +52,82 @@ class ArchitectureConfig:
 class BasisConfig:
     r"""The disturbance basis :math:`\Gamma_q` and its coefficient box :math:`\mathcal{A}`.
 
-    ``q`` and the knot vector are "fixed during estimation" (Section 5.1).
-    Decreasing the knot spacing or increasing ``q`` may reduce the
-    approximation error :math:`\varepsilon_{d,q}`, but also enlarges the class
-    of admissible disturbances and may worsen distinguishability between
-    parameter and disturbance effects.
+    ``q`` and the basis are "fixed during estimation" (Section 5.1).  Increasing
+    ``q`` may reduce the approximation error :math:`\varepsilon_{d,q}`, but also
+    enlarges the class of admissible disturbances and may worsen
+    distinguishability between parameter and disturbance effects.
+
+    Attributes
+    ----------
+    kind
+        ``"bspline"`` (Definition 1) or ``"fourier"`` (trigonometric).
+    degree, knot_style
+        B-spline options; ignored --- and rejected if set --- for ``"fourier"``.
+    omega
+        Fourier fundamental frequency :math:`\Omega`; likewise B-spline-invalid.
+    coeff_lo, coeff_hi
+        The box :math:`\mathcal{A}`.  Either a scalar, applied to every
+        coefficient, or a list of ``q`` values for a per-component box.
+    remainder_amplitude, remainder_rate
+        The out-of-class disturbance component
+        :math:`r_q(t) = \varepsilon_{d,q}\sin(\text{rate}\cdot t^2)` of Eq. (2).
+        An amplitude of ``0`` gives the exactly recoverable case
+        :math:`\varepsilon_{d,q} = 0`; a nonzero value makes exact recovery
+        impossible and bounds degrade by :math:`\varepsilon_{d,q}` per (4).
     """
 
+    kind: str = "bspline"
     q: int = 6
-    degree: int = 3
-    knot_style: str = "clamped"
-    coeff_lo: float = -5.0
-    coeff_hi: float = 5.0
+    degree: int | None = None
+    knot_style: str | None = None
+    omega: float | None = None
+    coeff_lo: float | list[float] = -5.0
+    coeff_hi: float | list[float] = 5.0
+    remainder_amplitude: float = 0.0
+    remainder_rate: float = 0.15
 
     def __post_init__(self) -> None:
-        if self.coeff_hi <= self.coeff_lo:
+        if self.q < 1:
+            raise ValueError(f"q must be positive, got {self.q}")
+        if self.remainder_amplitude < 0:
             raise ValueError(
-                f"require coeff_lo < coeff_hi, got ({self.coeff_lo}, {self.coeff_hi})"
+                f"remainder_amplitude must be non-negative, got {self.remainder_amplitude}"
             )
+        # Validates the interval list eagerly so a malformed box fails at
+        # config load rather than midway through data generation.
+        self.coefficient_intervals()
+
+    def basis_kwargs(self) -> dict[str, Any]:
+        """Basis-specific options, omitting those left unset."""
+        options = {
+            "degree": self.degree,
+            "knot_style": self.knot_style,
+            "omega": self.omega,
+        }
+        return {name: value for name, value in options.items() if value is not None}
+
+    def coefficient_intervals(self) -> list[tuple[float, float]]:
+        r"""The box :math:`\mathcal{A}` as ``q`` ``(lo, hi)`` pairs."""
+
+        def spread(value: float | list[float], label: str) -> list[float]:
+            if isinstance(value, (int, float)):
+                return [float(value)] * self.q
+            values = [float(entry) for entry in value]
+            if len(values) != self.q:
+                raise ValueError(
+                    f"{label} must be a scalar or a list of q={self.q} values, "
+                    f"got {len(values)}"
+                )
+            return values
+
+        lows = spread(self.coeff_lo, "coeff_lo")
+        highs = spread(self.coeff_hi, "coeff_hi")
+        for index, (low, high) in enumerate(zip(lows, highs)):
+            if high <= low:
+                raise ValueError(
+                    f"coefficient {index}: require lo < hi, got ({low}, {high})"
+                )
+        return list(zip(lows, highs))
 
 
 @dataclass

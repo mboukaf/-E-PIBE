@@ -31,10 +31,12 @@ import numpy as np
 import torch
 from torch import Tensor
 
+from pibe.basis.base import DisturbanceBasis
+
 _KNOT_STYLES = ("clamped", "uniform")
 
 
-class BSplineBasis:
+class BSplineBasis(DisturbanceBasis):
     r"""The vector of basis functions :math:`\Gamma_q` on :math:`[t_0, t_1]`.
 
     Parameters
@@ -79,15 +81,12 @@ class BSplineBasis:
             raise ValueError(
                 f"unknown knot_style {knot_style!r}, expected one of {_KNOT_STYLES}"
             )
+        super().__init__(q=q, t_start=t_start, t_end=t_end, dtype=dtype, device=device)
 
-        self._q = int(q)
         self._degree = int(degree)
-        self.t_start = float(t_start)
-        self.t_end = float(t_end)
         self.knot_style = knot_style
-        self._dtype = dtype
 
-        self.knots = self._build_knots().to(device=device, dtype=dtype)
+        self.knots = self._build_knots().to(device=self.device, dtype=dtype)
 
         # Index of the last knot span with positive length; used to extend the
         # level-0 indicators continuously from the left at t = t_end.
@@ -101,22 +100,9 @@ class BSplineBasis:
     # ------------------------------------------------------------------
 
     @property
-    def q(self) -> int:
-        """Number of basis functions."""
-        return self._q
-
-    @property
     def degree(self) -> int:
         """Spline degree :math:`m`."""
         return self._degree
-
-    @property
-    def dtype(self) -> torch.dtype:
-        return self._dtype
-
-    @property
-    def device(self) -> torch.device:
-        return self.knots.device
 
     # ------------------------------------------------------------------
     # evaluation
@@ -166,14 +152,11 @@ class BSplineBasis:
         term2 = self._safe_ratio(lower[..., 1 : q + 1], d2)
         return m * (term1 - term2)
 
-    def __call__(self, t: Tensor) -> Tensor:
-        return self.evaluate(t)
-
     # ------------------------------------------------------------------
     # linear independence, Eq. (3)
     # ------------------------------------------------------------------
 
-    def gram(self, nodes_per_span: int | None = None) -> Tensor:
+    def gram(self, nodes_per_span: int | None = None, **_) -> Tensor:
         r"""The Gram matrix :math:`W_\Gamma = \int_{t_0}^{t_1} \Gamma_q \Gamma_q^\top\,dt`.
 
         Integrated span by span with Gauss-Legendre quadrature.  Since
@@ -202,39 +185,12 @@ class BSplineBasis:
             gram = gram + half * torch.einsum("g,gi,gj->ij", weights, values, values)
         return 0.5 * (gram + gram.T)
 
-    def min_gram_eigenvalue(self, nodes_per_span: int | None = None) -> float:
-        r"""The constant :math:`\underline{\gamma}_d` of Eq. (3).
-
-        Positive iff the basis functions are linearly independent on the
-        horizon.
-        """
-        eigenvalues = torch.linalg.eigvalsh(self.gram(nodes_per_span))
-        return float(eigenvalues.min())
-
-    def check_linear_independence(self, tol: float = 1e-12) -> float:
-        """Assert Eq. (3) and return :math:`\\underline{\\gamma}_d`."""
-        gamma_d = self.min_gram_eigenvalue()
-        if gamma_d <= tol:
-            raise ValueError(
-                f"basis functions are not linearly independent on "
-                f"[{self.t_start}, {self.t_end}]: lambda_min(W_Gamma) = {gamma_d:.3e}"
-            )
-        return gamma_d
-
-    # ------------------------------------------------------------------
-    # placement
-    # ------------------------------------------------------------------
-
-    def to(self, device: torch.device | str | None = None, dtype: torch.dtype | None = None):
-        """Move the knot vector in place and return ``self``."""
-        if dtype is not None:
-            self._dtype = dtype
-        self.knots = self.knots.to(device=device, dtype=dtype)
-        return self
-
     # ------------------------------------------------------------------
     # internals
     # ------------------------------------------------------------------
+
+    def _move(self, device: torch.device, dtype: torch.dtype) -> None:
+        self.knots = self.knots.to(device=device, dtype=dtype)
 
     def _build_knots(self) -> Tensor:
         """Return the knot vector, of length ``q + degree + 1``."""

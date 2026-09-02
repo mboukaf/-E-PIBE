@@ -13,11 +13,15 @@ from dataclasses import dataclass
 import torch
 from torch import Tensor
 
-from pibe.basis.bspline import BSplineBasis
+from pibe.basis import DisturbanceBasis, build_basis
 from pibe.config import RunConfig
 from pibe.core.bank import EstimatorBank
 from pibe.data.dataset import TrajectoryData, generate_dataset
-from pibe.data.disturbance import BasisDisturbance, sample_coefficients
+from pibe.data.disturbance import (
+    BasisDisturbance,
+    ChirpRemainder,
+    sample_coefficients,
+)
 from pibe.data.noise import NoiseFree, NoiseModel, TruncatedGaussianNoise
 from pibe.data.simulate import fill_distance, uniform_grid
 from pibe.systems.base import TriangularSystem
@@ -36,7 +40,7 @@ class Experiment:
 
     config: RunConfig
     system: TriangularSystem
-    basis: BSplineBasis
+    basis: DisturbanceBasis
     disturbance: BasisDisturbance
     noise: NoiseModel
     data: TrajectoryData
@@ -69,6 +73,7 @@ class Experiment:
                 f"true theta        : {self.system.theta_true.tolist()}",
                 f"basis             : {self.basis}",
                 f"  lambda_min(W)   : {gamma_d:.4e}   (Eq. 3, must be > 0)",
+                f"  eps_(d,q)       : {self.disturbance.remainder_bound(self.data.t):.4e}",
                 f"noise             : {self.noise}",
                 f"data              : {self.data}",
                 f"  train / val     : {len(self.train_data)} / {len(self.val_data)}",
@@ -102,29 +107,36 @@ def build_experiment(config: RunConfig) -> Experiment:
     # --- system -------------------------------------------------------
     system = build_system(config.system.name, dtype=dtype, **config.system.kwargs)
 
-    # --- disturbance basis, Definition 1 ------------------------------
+    # --- disturbance basis, Eq. (2) -----------------------------------
     horizon = config.data.horizon
-    basis = BSplineBasis(
+    basis = build_basis(
+        kind=config.basis.kind,
         q=config.basis.q,
-        degree=config.basis.degree,
         t_start=0.0,
         t_end=horizon,
-        knot_style=config.basis.knot_style,
         dtype=dtype,
+        **config.basis.basis_kwargs(),
     )
     gamma_d = basis.check_linear_independence()
     logger.debug("basis is linearly independent, lambda_min(W_Gamma)=%.4e", gamma_d)
 
     coefficient_bounds = torch.tensor(
-        [[config.basis.coeff_lo, config.basis.coeff_hi]], dtype=dtype
-    ).expand(basis.q, 2).clone()
+        config.basis.coefficient_intervals(), dtype=dtype
+    )
 
-    # --- true disturbance, Eq. (2) with r_q = 0 -----------------------
+    # --- true disturbance, Eq. (2) ------------------------------------
+    # A zero remainder amplitude gives the exactly recoverable case
+    # (eps_{d,q} = 0); a nonzero one puts d outside the basis span.
     data_generator = make_generator(config.data.seed)
     coefficients = sample_coefficients(
-        basis, (config.basis.coeff_lo, config.basis.coeff_hi), generator=data_generator
+        basis, coefficient_bounds, generator=data_generator
     )
-    disturbance = BasisDisturbance(basis, coefficients)
+    remainder = (
+        ChirpRemainder(config.basis.remainder_amplitude, config.basis.remainder_rate)
+        if config.basis.remainder_amplitude > 0
+        else None
+    )
+    disturbance = BasisDisturbance(basis, coefficients, remainder=remainder)
     system.disturbance = disturbance
 
     # --- data, Eq. (135) ----------------------------------------------

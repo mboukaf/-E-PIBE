@@ -67,7 +67,9 @@ def test_architecture_normalizes_hidden_widths_to_tuples() -> None:
 @pytest.mark.parametrize(
     ("section", "payload", "message"),
     [
-        (BasisConfig, {"coeff_lo": 1.0, "coeff_hi": 0.0}, "coeff_lo < coeff_hi"),
+        (BasisConfig, {"coeff_lo": 1.0, "coeff_hi": 0.0}, "require lo < hi"),
+        (BasisConfig, {"q": 4, "coeff_lo": [-1.0, -1.0]}, "list of q=4 values"),
+        (BasisConfig, {"remainder_amplitude": -0.1}, "remainder_amplitude"),
         (DataConfig, {"n_samples": 1}, "n_samples"),
         (DataConfig, {"horizon": -1.0}, "horizon"),
         (DataConfig, {"noise_sigma": -0.5}, "noise_sigma"),

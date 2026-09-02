@@ -53,7 +53,7 @@ from typing import Literal
 import torch
 from torch import Tensor
 
-from pibe.basis.bspline import BSplineBasis
+from pibe.basis.base import DisturbanceBasis
 from pibe.core.cell import CellOutput
 from pibe.systems.base import TriangularSystem
 
@@ -168,7 +168,7 @@ def state_residual(
 
 def final_residual(
     system: TriangularSystem,
-    basis: BSplineBasis,
+    basis: DisturbanceBasis,
     current: CellOutput,
     outputs: dict[int, CellOutput],
     t_grid: Tensor,
@@ -216,7 +216,7 @@ def final_residual(
     return derivative - drift - disturbance_estimate(basis, current.head, t_grid)
 
 
-def disturbance_estimate(basis: BSplineBasis, a_hat: Tensor, t_grid: Tensor) -> Tensor:
+def disturbance_estimate(basis: DisturbanceBasis, a_hat: Tensor, t_grid: Tensor) -> Tensor:
     r"""The estimated disturbance :math:`\hat d(t) = \Gamma_q(t)^\top \hat a`, Eq. (41).
 
     Parameters
