@@ -1,0 +1,308 @@
+r"""Algorithm 1 --- Training Procedure for the PIBE framework.
+
+::
+
+     1: for k <- 2 to n + 1 do
+     2:     Initialize the current cell parameters Theta^k_PINN
+     3:     for i <- 0 to N_tot - 1 do
+     4:         Select a mini-batch of trajectory indices
+     5:         if i < N_par then                        > local pre-training
+     6:             Freeze {Theta^m_PINN}_{m=2}^{k-1}
+     7:             Construct U_{k-1} from detached upstream outputs,
+     8:             Evaluate Phi^k and compute L^k_Loc using (22), (28) or (37)
+     9:             Update only Theta^k_PINN using grad L^k_Loc
+    10:         else                                     > end-to-end fine-tuning
+    11:             Unfreeze {Theta^m_PINN}_{m=2}^{k}
+    12:             Evaluate {Phi^m}_{m=2}^k sequentially without detaching
+    13:             Compute {L^m_Loc}_{m=2}^k
+    14:             L^k_Tot <- sum_{m=2}^k e^{-(k-m)/k} L^m_Loc
+    15:             Update {Theta^m_PINN}_{m=2}^k using grad L^k_Tot
+    16:         end if
+    17:     end for
+    18: end for
+    19: Set d(t) <- Gamma_q(t)^T a
+
+Line 2 needs no explicit action here: the bank is constructed with all cells
+freshly initialized, and cell ``k`` is not touched by any optimizer before the
+outer loop reaches it, so its parameters are still at their initialization when
+its turn comes.
+
+A note on ``torch.no_grad``: validation deliberately does *not* use it.  Every
+physics residual differentiates the decoder in ``t`` via autograd, which
+requires grad mode to be enabled; only ``create_graph`` is switched off, so no
+backward graph is retained.
+"""
+
+from __future__ import annotations
+
+import time
+from dataclasses import dataclass
+
+import torch
+from torch import Tensor
+
+from pibe.config import TrainingConfig
+from pibe.core.bank import EstimatorBank, Mode
+from pibe.core.losses import CellLoss, total_loss
+from pibe.data.dataset import TrajectoryBatcher, TrajectoryData
+from pibe.training.callbacks import History, IterationRecord
+from pibe.training.phases import apply_phase, mode_for_iteration
+from pibe.utils.logging import get_logger
+
+logger = get_logger(__name__)
+
+
+@dataclass
+class StepResult:
+    """The outcome of one optimizer step."""
+
+    objective: float
+    target: CellLoss
+    grad_norm: float
+
+
+class PIBETrainer:
+    r"""Trains an :class:`~pibe.core.bank.EstimatorBank` per Algorithm 1.
+
+    Parameters
+    ----------
+    bank
+        The bank to train.
+    train_data
+        Training trajectories, :math:`\Omega^{train}`.
+    t_coll
+        The collocation grid :math:`\{\tau_j\}_{j=1}^{N_r}`, shape ``(N_r,)``.
+    config
+        Schedule and optimizer settings.
+    val_data
+        Optional held-out trajectories, :math:`\Omega^{test}`.
+    generator
+        RNG for minibatch selection.
+    """
+
+    def __init__(
+        self,
+        bank: EstimatorBank,
+        train_data: TrajectoryData,
+        t_coll: Tensor,
+        config: TrainingConfig,
+        val_data: TrajectoryData | None = None,
+        generator: torch.Generator | None = None,
+        history: History | None = None,
+    ) -> None:
+        if train_data.n_samples != bank.n_samples:
+            raise ValueError(
+                f"bank was built for N={bank.n_samples} samples but the data "
+                f"has N={train_data.n_samples}"
+            )
+        if t_coll.ndim != 1 or t_coll.numel() < 2:
+            raise ValueError("t_coll must be a 1-D grid with at least two points")
+
+        self.bank = bank
+        self.train_data = train_data
+        self.val_data = val_data
+        self.t_coll = t_coll
+        self.config = config
+        self.history = history if history is not None else History()
+        self.batcher = TrajectoryBatcher(
+            n_trajectories=train_data.n_trajectories,
+            batch_size=config.batch_size,
+            generator=generator,
+            device=train_data.x.device,
+        )
+
+    # ------------------------------------------------------------------
+    # outer loop
+    # ------------------------------------------------------------------
+
+    def train(self) -> History:
+        """Run the full procedure over cells ``2..n+1`` (lines 1-18)."""
+        for cell_index in self.bank.cell_indices:
+            self.train_cell(cell_index)
+        return self.history
+
+    def train_cell(self, cell_index: int) -> None:
+        """Train one cell through both regimes (lines 2-17)."""
+        config = self.config
+        started = time.perf_counter()
+        logger.info(
+            "cell %d/%d: %d local iterations then %d fine-tuning iterations",
+            cell_index,
+            self.bank.final_index,
+            config.n_par,
+            config.n_total - config.n_par,
+        )
+
+        optimizer: torch.optim.Optimizer | None = None
+        active: list[torch.nn.Parameter] = []
+        current_mode: Mode | None = None
+
+        for iteration in range(config.n_total):
+            mode = mode_for_iteration(iteration, config.n_par)
+            if mode is not current_mode:
+                # Phase boundary: reset the freeze flags and build an optimizer
+                # over the newly active parameter block.
+                active = apply_phase(self.bank, cell_index, mode)
+                optimizer = torch.optim.Adam(
+                    active,
+                    lr=config.lr_local if mode is Mode.LOCAL else config.lr_global,
+                    weight_decay=config.weight_decay,
+                )
+                current_mode = mode
+                logger.debug(
+                    "cell %d entering %s phase with %d trainable tensors",
+                    cell_index,
+                    mode.value,
+                    len(active),
+                )
+
+            assert optimizer is not None
+            result = self.step(cell_index, mode, optimizer, active)
+
+            if config.log_every > 0 and (
+                iteration % config.log_every == 0 or iteration == config.n_total - 1
+            ):
+                self.history.log_iteration(
+                    IterationRecord(
+                        cell=cell_index,
+                        iteration=iteration,
+                        mode=mode.value,
+                        objective=result.objective,
+                        data=float(result.target.data),
+                        physics=float(result.target.physics),
+                        local=float(result.target.local),
+                        grad_norm=result.grad_norm,
+                    )
+                )
+                logger.info(
+                    "  cell %d | i=%5d | %-6s | obj=%.4e | data=%.4e | phys=%.4e | |g|=%.2e",
+                    cell_index,
+                    iteration,
+                    mode.value,
+                    result.objective,
+                    float(result.target.data),
+                    float(result.target.physics),
+                    result.grad_norm,
+                )
+
+        elapsed = time.perf_counter() - started
+        entry: dict[str, float | int | str] = {
+            "cell": cell_index,
+            "seconds": elapsed,
+        }
+        if self.val_data is not None:
+            validation = self.evaluate(cell_index, self.val_data)
+            entry.update(
+                {f"val_{name}": value for name, value in validation.as_floats().items()}
+            )
+            logger.info(
+                "  cell %d done in %.1fs | val local=%.4e (data=%.4e, phys=%.4e)",
+                cell_index,
+                elapsed,
+                float(validation.local),
+                float(validation.data),
+                float(validation.physics),
+            )
+        else:
+            logger.info("  cell %d done in %.1fs", cell_index, elapsed)
+        self.history.log_validation(entry)
+
+    # ------------------------------------------------------------------
+    # one step
+    # ------------------------------------------------------------------
+
+    def step(
+        self,
+        cell_index: int,
+        mode: Mode,
+        optimizer: torch.optim.Optimizer,
+        active: list[torch.nn.Parameter],
+    ) -> StepResult:
+        """One optimizer step (lines 4-15)."""
+        index = self.batcher.sample()
+        y = self.train_data.y[index]
+
+        outputs = self.bank(
+            target_cell=cell_index,
+            y=y,
+            t_data=self.train_data.t,
+            t_coll=self.t_coll,
+            mode=mode,
+        )
+        losses = self.bank.losses(
+            target_cell=cell_index,
+            y=y,
+            t_coll=self.t_coll,
+            outputs=outputs,
+            lam=self.config.lam,
+            mode=mode,
+        )
+
+        if mode is Mode.LOCAL:
+            objective = losses[cell_index].local
+        else:
+            objective = total_loss(
+                {m: loss.local for m, loss in losses.items()}, cell_index
+            )
+
+        optimizer.zero_grad(set_to_none=True)
+        objective.backward()
+        if self.config.grad_clip is not None:
+            grad_norm = float(
+                torch.nn.utils.clip_grad_norm_(active, self.config.grad_clip)
+            )
+        else:
+            grad_norm = float(
+                torch.sqrt(
+                    sum(
+                        (p.grad.detach() ** 2).sum()
+                        for p in active
+                        if p.grad is not None
+                    )
+                )
+            )
+        optimizer.step()
+
+        return StepResult(
+            objective=float(objective.detach()),
+            target=losses[cell_index],
+            grad_norm=grad_norm,
+        )
+
+    # ------------------------------------------------------------------
+    # evaluation
+    # ------------------------------------------------------------------
+
+    def evaluate(self, cell_index: int, data: TrajectoryData) -> CellLoss:
+        """The target cell's local loss on held-out trajectories.
+
+        Runs with grad mode enabled but ``create_graph=False``: the physics
+        residual needs the autograd time derivative, while no backward graph
+        is required.
+        """
+        was_training = self.bank.training
+        self.bank.eval()
+        try:
+            with torch.enable_grad():
+                outputs = self.bank(
+                    target_cell=cell_index,
+                    y=data.y,
+                    t_data=data.t,
+                    t_coll=self.t_coll,
+                    mode=Mode.GLOBAL,
+                    create_graph=False,
+                )
+                loss = self.bank.cell_loss(
+                    cell_index=cell_index,
+                    y=data.y,
+                    t_coll=self.t_coll,
+                    outputs=outputs,
+                    lam=self.config.lam,
+                )
+        finally:
+            self.bank.train(was_training)
+        return CellLoss(
+            data=loss.data.detach(),
+            physics=loss.physics.detach(),
+            local=loss.local.detach(),
+        )

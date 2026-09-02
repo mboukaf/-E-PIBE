@@ -1,0 +1,10 @@
+Metadata-Version: 2.4
+Name: pibe
+Version: 0.1.0
+Summary: Physics-Informed Bank of Estimators for joint state, parameter and disturbance estimation
+Requires-Python: >=3.11
+Requires-Dist: torch>=2.9
+Requires-Dist: numpy>=1.26
+Requires-Dist: pyyaml>=6.0
+Provides-Extra: dev
+Requires-Dist: pytest>=8.0; extra == "dev"

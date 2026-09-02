@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pibe"
+version = "0.1.0"
+description = "Physics-Informed Bank of Estimators for joint state, parameter and disturbance estimation"
+requires-python = ">=3.11"
+dependencies = [
+    "torch>=2.9",
+    "numpy>=1.26",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
