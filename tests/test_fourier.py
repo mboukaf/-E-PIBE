@@ -70,10 +70,34 @@ def test_derivative_matches_central_differences(q: int) -> None:
     assert torch.allclose(basis.derivative(t), numeric, atol=1e-7)
 
 
-def test_rejects_odd_q() -> None:
-    """Sine/cosine pairs require an even number of basis functions."""
-    with pytest.raises(ValueError, match="even q"):
-        FourierBasis(q=5)
+@pytest.mark.parametrize("q", [1, 2, 3, 5])
+def test_odd_q_truncates_the_last_cosine(q: int) -> None:
+    r"""An odd ``q`` keeps the highest sine and drops its cosine.
+
+    ``q = 3`` gives exactly the specification's
+    :math:`[\sin\Omega t, \cos\Omega t, \sin 2\Omega t]`.
+    """
+    basis = make(q=q)
+    t = torch.linspace(0.0, HORIZON, 33, dtype=torch.float64)
+    values = basis.evaluate(t)
+    assert values.shape == (33, q)
+
+    full = []
+    for h in range(1, (q + 1) // 2 + 1):
+        full.append(torch.sin(h * OMEGA * t))
+        full.append(torch.cos(h * OMEGA * t))
+    expected = torch.stack(full, dim=-1)[:, :q]
+    assert torch.allclose(values, expected, atol=1e-14)
+
+
+def test_odd_q_preserves_orthogonality() -> None:
+    """Truncation keeps ``W_Gamma = (T/2) I_q`` on a commensurate horizon."""
+    for q in (1, 3, 5):
+        basis = make(q=q)
+        gram = basis.gram()
+        identity = 0.5 * HORIZON * torch.eye(q, dtype=torch.float64)
+        assert torch.allclose(gram, identity, atol=1e-10), f"q={q}"
+        assert basis.min_gram_eigenvalue() == pytest.approx(10.0, abs=1e-9)
 
 
 def test_default_omega_is_one_period_over_the_horizon() -> None:

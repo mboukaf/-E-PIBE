@@ -24,6 +24,7 @@ if str(REPO_ROOT / "src") not in sys.path:  # allow running without installing
 
 from pibe.config import RunConfig  # noqa: E402
 from pibe.eval.metrics import compute_metrics  # noqa: E402
+from pibe.eval.observability import basis_observability  # noqa: E402
 from pibe.eval.oracle import compare_to_oracle  # noqa: E402
 from pibe.experiment import build_experiment  # noqa: E402
 from pibe.training.callbacks import save_checkpoint  # noqa: E402
@@ -92,6 +93,20 @@ def main() -> int:
 
     experiment = build_experiment(config)
     logger.info("experiment:\n%s", experiment.describe())
+    # Reported before training: whether each disturbance coefficient is even
+    # visible at the output is a property of the plant and sigma, not of the
+    # estimator, and it bounds what any run can achieve.
+    if config.data.noise_sigma > 0:
+        logger.info(
+            "%s",
+            basis_observability(
+                system=experiment.system,
+                basis=experiment.basis,
+                coefficient_bounds=experiment.coefficient_bounds,
+                noise_sigma=config.data.noise_sigma,
+                n_samples=config.data.n_samples,
+            ).summary(),
+        )
     config.to_yaml(output_dir / "config.resolved.yaml")
 
     if args.dry_run:

@@ -23,7 +23,7 @@ data:
   n_samples: 201            # N over [0, T]; h_d = 0.05
   horizon: 20.0             # T -- exactly four periods of the fundamental
   substeps: 8
-  noise_sigma: 0.01
+  noise_sigma: 0.002       # see below: 0.01 puts the 2nd harmonic of d under the noise
   noise_truncation_sigmas: 3.0
   train_fraction: 0.8
   seed: 1
@@ -43,15 +43,20 @@ architecture:
   decoder_hidden: [64, 64, 64]
   head_hidden: [64, 64]
   activation: tanh
+  time_fourier_features: 10   # lifts t into harmonics; a plain MLP cannot
+                              # resolve several periods, and that fit error is
+                              # what destroys the disturbance estimate downstream
 
 training:
   n_total: 6000
-  n_par: 4500
+  n_par: 3000
+  final_global_iters: 30000   # the final cell is the only place the bank closes
   lam: 1.0
   n_collocation: 401
   batch_size: 16
   lr_local: 1.0e-3
-  lr_global: 2.0e-4
+  lr_global: 5.0e-4
+  lr_schedule: cosine
   weight_decay: 0.0
   grad_clip: 1.0
   log_every: 250

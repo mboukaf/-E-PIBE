@@ -1,0 +1,65 @@
+# PIBE on the third-order triangular benchmark.
+#
+#   xdot_1 = x_2 - 0.35 tanh x_1 + th_1 (0.8 + 0.2 cos x_1)
+#   xdot_2 = x_3 - 0.30 tanh x_2 + 0.10 sin x_1
+#                + th_2 (0.9 + 0.1 sin x_1 + 0.1 cos x_2)
+#   xdot_3 = -0.648 x_1 - 2.34 x_2 - 2.7 x_3 + 0.15 sin x_1 + 0.08 tanh(x_1 x_2)
+#                + 0.08 th_1 sin x_2 + 0.06 th_2 tanh x_3 + d(t)
+#   y      = x_1 + omega
+#
+# Linear skeleton (s+0.6)(s+0.9)(s+1.2) -- Hurwitz.
+# Excitation floors: gamma_2 >= 0.36, gamma_3 >= 0.49.
+# Cells: 2 -> (x_2, th_1);  3 -> (x_3, th_2);  4 -> x_3 reconstruction + a.
+
+system:
+  name: automatica_n3
+  kwargs:
+    theta_seed: 0        # theta_i ~ U[-0.25, 0.25], drawn once, then constant
+
+data:
+  n_trajectories: 64
+  n_samples: 201         # h_d = 0.10
+  horizon: 20.0          # four periods of the fundamental
+  substeps: 8
+  noise_sigma: 0.002
+  noise_truncation_sigmas: 3.0
+  train_fraction: 0.8
+  seed: 1
+
+basis:                   # Gamma_3 = [sin(Om t), cos(Om t), sin(2 Om t)]^T
+  kind: fourier
+  q: 3
+  omega: 1.2566370614359172
+  coeff_lo: [-0.18, -0.18, -0.12]
+  coeff_hi: [ 0.18,  0.18,  0.12]
+  remainder_amplitude: 0.0    # 0.03 for the basis-mismatch experiment
+  remainder_rate: 0.15
+
+architecture:
+  latent_dim: 32
+  encoder_hidden: [128, 128]
+  decoder_hidden: [64, 64, 64]
+  head_hidden: [64, 64]
+  activation: tanh
+  time_fourier_features: 10
+  time_feature_scaling: true
+
+training:
+  n_total: 6000
+  n_par: 3000
+  final_global_iters: 30000
+  lam: 1.0
+  n_collocation: 401
+  batch_size: 16
+  lr_local: 1.0e-3
+  lr_global: 5.0e-4
+  lr_schedule: cosine
+  weight_decay: 0.0
+  grad_clip: 1.0
+  log_every: 3000
+  seed: 0
+
+device: auto
+dtype: float64
+seed: 0
+output_dir: outputs/n3

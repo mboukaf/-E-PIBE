@@ -20,7 +20,8 @@ def test_disabled_features_are_the_identity() -> None:
 
 @pytest.mark.parametrize("k", [1, 4, 8])
 def test_feature_values_and_width(k: int) -> None:
-    lift = FourierTimeFeatures(k).to(torch.float64)
+    """Raw (unscaled) feature values and layout."""
+    lift = FourierTimeFeatures(k, scale_by_harmonic=False).to(torch.float64)
     t = torch.linspace(-1, 1, 11, dtype=torch.float64).reshape(-1, 1)
     out = lift(t)
     assert lift.out_dim == 1 + 2 * k
@@ -99,3 +100,38 @@ def test_features_help_fit_an_oscillatory_target() -> None:
         f"Fourier features should dominate on an oscillatory target: "
         f"plain={plain:.3e}, lifted={lifted:.3e}"
     )
+
+
+def test_harmonic_scaling_equalises_derivative_influence() -> None:
+    r"""Scaling by ``1/k`` makes every harmonic contribute equally to ``d/dt``.
+
+    Unscaled, harmonic ``k``'s derivative grows like ``k``, so a large lift lets
+    the fastest features dominate the physics residual and its conditioning
+    collapses.  This is measured, not assumed: it is why ``K = 40`` trains far
+    worse than ``K = 10`` without the scaling.
+    """
+    grid = torch.linspace(-1, 1, 401, dtype=torch.float64).reshape(-1, 1)
+    step = 1e-6
+
+    def derivative_scale(scaled: bool) -> torch.Tensor:
+        lift = FourierTimeFeatures(16, scale_by_harmonic=scaled).to(torch.float64)
+        d = (lift(grid + step) - lift(grid - step)) / (2 * step)
+        # RMS derivative magnitude of each sine feature (columns 1..K).
+        return d[:, 1:17].pow(2).mean(0).sqrt()
+
+    unscaled = derivative_scale(False)
+    scaled = derivative_scale(True)
+    # Unscaled: the 16th harmonic's derivative is ~16x the first.
+    assert float(unscaled[-1] / unscaled[0]) == pytest.approx(16.0, rel=0.05)
+    # Scaled: every harmonic contributes the same derivative magnitude.
+    assert float(scaled.max() / scaled.min()) == pytest.approx(1.0, abs=0.02)
+
+
+def test_scaling_preserves_representable_functions() -> None:
+    """The lift still spans the same space; only the parameterization changes."""
+    grid = torch.linspace(-1, 1, 51, dtype=torch.float64).reshape(-1, 1)
+    scaled = FourierTimeFeatures(6, scale_by_harmonic=True).to(torch.float64)(grid)
+    plain = FourierTimeFeatures(6, scale_by_harmonic=False).to(torch.float64)(grid)
+    ks = torch.arange(1, 7, dtype=torch.float64)
+    assert torch.allclose(scaled[:, 1:7] * ks, plain[:, 1:7], atol=1e-12)
+    assert torch.allclose(scaled[:, 7:13] * ks, plain[:, 7:13], atol=1e-12)

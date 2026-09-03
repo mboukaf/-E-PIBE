@@ -55,17 +55,33 @@ class FourierTimeFeatures(nn.Module):
     the harmonics are of the *horizon*, so a disturbance at :math:`\Omega` with
     an integer number of periods over :math:`[0,T]` is represented exactly.
 
+    Amplitude scaling
+    -----------------
+    Harmonics are scaled by :math:`1/k`.  This matters because the physics
+    residual differentiates the decoder: since
+    :math:`\frac{d}{dt}\sin(k\pi t) = k\pi\cos(k\pi t)`, unit-amplitude
+    features make harmonic :math:`k` contribute :math:`k` times as strongly to
+    :math:`\dot{\hat x}` as to :math:`\hat x`.  With a large ``K`` the highest
+    harmonics then dominate the residual and its conditioning collapses --- in
+    practice training degrades sharply somewhere above ``K ~ 10``.  Scaling by
+    :math:`1/k` equalizes each harmonic's influence on the *derivative*, which
+    is the quantity the loss actually sees, and costs nothing in
+    expressiveness: the network simply learns a correspondingly larger weight.
+
     Parameters
     ----------
     n_features
         Number of harmonics ``K``.  ``0`` disables the lift entirely.
+    scale_by_harmonic
+        Apply the :math:`1/k` amplitude scaling described above.
     """
 
-    def __init__(self, n_features: int) -> None:
+    def __init__(self, n_features: int, scale_by_harmonic: bool = True) -> None:
         super().__init__()
         if n_features < 0:
             raise ValueError(f"n_features must be non-negative, got {n_features}")
         self.n_features = int(n_features)
+        self.scale_by_harmonic = bool(scale_by_harmonic)
         if self.n_features:
             # Stored as exact integers, with pi applied in the working dtype at
             # call time.  Baking pi into a buffer built at the default dtype
@@ -85,11 +101,17 @@ class FourierTimeFeatures(nn.Module):
         """``t_scaled`` in ``[-1, 1]``, shape ``(..., 1)`` -> ``(..., out_dim)``."""
         if not self.n_features:
             return t_scaled
-        phase = t_scaled * (math.pi * self.harmonics.to(t_scaled.dtype))
-        return torch.cat([t_scaled, torch.sin(phase), torch.cos(phase)], dim=-1)
+        harmonics = self.harmonics.to(t_scaled.dtype)
+        phase = t_scaled * (math.pi * harmonics)
+        amplitude = (1.0 / harmonics) if self.scale_by_harmonic else 1.0
+        return torch.cat(
+            [t_scaled, amplitude * torch.sin(phase), amplitude * torch.cos(phase)],
+            dim=-1,
+        )
 
     def extra_repr(self) -> str:  # pragma: no cover - trivial
-        return f"n_features={self.n_features}, out_dim={self.out_dim}"
+        return (f"n_features={self.n_features}, out_dim={self.out_dim}, "
+                f"scale_by_harmonic={self.scale_by_harmonic}")
 
 
 class StateDecoder(nn.Module):
@@ -118,6 +140,7 @@ class StateDecoder(nn.Module):
         hidden: Sequence[int] = (64, 64, 64),
         activation: str = "tanh",
         time_fourier_features: int = 0,
+        time_feature_scaling: bool = True,
     ) -> None:
         super().__init__()
         output_bounds = torch.as_tensor(output_bounds)
@@ -130,7 +153,9 @@ class StateDecoder(nn.Module):
         self.t_start = float(t_start)
         self.t_end = float(t_end)
 
-        self.time_features = FourierTimeFeatures(time_fourier_features)
+        self.time_features = FourierTimeFeatures(
+            time_fourier_features, scale_by_harmonic=time_feature_scaling
+        )
         self.net = MLP(
             in_dim=self.time_features.out_dim + self.latent_dim,
             out_dim=self.out_dim,

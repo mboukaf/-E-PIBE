@@ -3,9 +3,8 @@ r"""Trigonometric basis for the structured disturbance component.
 .. math::
 
     \Gamma_q(t) = \bigl[\sin(\Omega t)\ \cos(\Omega t)\
-                        \sin(2\Omega t)\ \cos(2\Omega t)\ \cdots\
-                        \sin(H\Omega t)\ \cos(H\Omega t)\bigr]^\top,
-    \qquad q = 2H,
+                        \sin(2\Omega t)\ \cos(2\Omega t)\ \cdots\bigr]^\top,
+    \qquad \text{truncated to } q \text{ terms,}
 
 so that :math:`d_q(t) = \Gamma_q(t)^\top a` is a real trigonometric polynomial
 with fundamental frequency :math:`\Omega`.  Every component is :math:`C^\infty`,
@@ -51,7 +50,12 @@ class FourierBasis(DisturbanceBasis):
     Parameters
     ----------
     q
-        Number of basis functions; must be even, ``q = 2H``.
+        Number of basis functions.  Sine/cosine pairs are generated in
+        increasing harmonic order and truncated to ``q`` terms, so an odd ``q``
+        simply drops the last cosine --- e.g. ``q = 3`` gives
+        :math:`[\sin\Omega t,\ \cos\Omega t,\ \sin 2\Omega t]`.  Truncation
+        preserves mutual orthogonality, so :math:`W_\Gamma = (T/2)I_q` still
+        holds on a commensurate horizon.
     omega
         Fundamental angular frequency :math:`\Omega`.  If omitted it is set to
         :math:`2\pi / (t_{end} - t_{start})`, one period over the horizon.
@@ -68,13 +72,11 @@ class FourierBasis(DisturbanceBasis):
         dtype: torch.dtype = torch.float64,
         device: torch.device | str | None = None,
     ) -> None:
-        if q % 2 != 0:
-            raise ValueError(
-                f"a sine/cosine basis needs an even q = 2H, got q={q}"
-            )
         super().__init__(q=q, t_start=t_start, t_end=t_end, dtype=dtype, device=device)
 
-        self.n_harmonics = self._q // 2
+        # Ceiling: an odd q keeps the sine of the highest harmonic and drops
+        # its cosine.
+        self.n_harmonics = (self._q + 1) // 2
         if omega is None:
             omega = 2.0 * math.pi / self.horizon
         if omega <= 0:
@@ -104,11 +106,11 @@ class FourierBasis(DisturbanceBasis):
         shifted = (t - self.t_start).unsqueeze(-1)
         return self.omega * shifted * self._harmonics
 
-    @staticmethod
-    def _interleave(sine: Tensor, cosine: Tensor) -> Tensor:
-        """Interleave into ``[sin_1, cos_1, sin_2, cos_2, ...]``."""
+    def _interleave(self, sine: Tensor, cosine: Tensor) -> Tensor:
+        """Interleave into ``[sin_1, cos_1, sin_2, cos_2, ...]``, cut to ``q``."""
         stacked = torch.stack([sine, cosine], dim=-1)
-        return stacked.reshape(*sine.shape[:-1], 2 * sine.shape[-1])
+        full = stacked.reshape(*sine.shape[:-1], 2 * sine.shape[-1])
+        return full[..., : self._q]
 
     def evaluate(self, t: Tensor) -> Tensor:
         r"""Evaluate :math:`\Gamma_q(t)`; ``(...)`` in, ``(..., q)`` out."""

@@ -26,8 +26,50 @@ d(t) = Γ_q(t)ᵀa + r_q(t)
 
 | name | note |
 |---|---|
-| `automatica_n4` | The fourth-order benchmark — **the one to use** |
+| `automatica_n3` | Third-order benchmark — **the one to use** ([config](configs/automatica_n3.yaml)) |
+| `automatica_n4` | Fourth-order variant ([config](configs/automatica_n4.yaml)) |
 | `sin_chain` | Generic test fixture, parameterized in `n` |
+
+### `automatica_n3` — measured results
+
+```
+ẋ_1 = x_2 − 0.35 tanh x_1 + θ_1(0.8 + 0.2 cos x_1)
+ẋ_2 = x_3 − 0.30 tanh x_2 + 0.10 sin x_1 + θ_2(0.9 + 0.1 sin x_1 + 0.1 cos x_2)
+ẋ_3 = −0.648x_1 − 2.34x_2 − 2.7x_3 + 0.15 sin x_1 + 0.08 tanh(x_1x_2)
+      + 0.08θ_1 sin x_2 + 0.06θ_2 tanh x_3 + d(t)
+y   = x_1 + ω
+```
+`T = 20`, `Ω = 2π/5`, `Γ_3 = [sin Ωt, cos Ωt, sin 2Ωt]ᵀ`, `W_Γ = 10·I₃`,
+poles `−0.6, −0.9, −1.2`, `γ_2 ≥ 0.36`, `γ_3 ≥ 0.49`.
+
+Three seeds at `σ = 0.002`, held-out trajectories:
+
+| quantity | s0 | s1 | s2 | verdict |
+|---|---|---|---|---|
+| `x_1` (measured) | 2.66e-03 | 2.63e-03 | 3.63e-03 | **reliable** |
+| `d` L² | 1.11e-02 | 9.48e-03 | 1.45e-02 | **reliable** (8–12% of ‖d‖∞) |
+| `θ_1` | 0.165 | 0.077 | 0.230 | seed-dependent |
+| `θ_2` | 0.165 | 0.077 | 0.234 | seed-dependent |
+| `x_2` | 0.156 | 0.073 | 0.218 | tracks `θ` |
+| `L_Tot` | 2.246e-05 | 2.232e-05 | 3.733e-05 | — |
+
+Disturbance coefficients on the noise-free run recover in observability order:
+`a_1` **0.8%**, `a_2` 7.6%, `a_3` 24.1% — `a_3` is the 2Ω component, the least
+visible at the output.
+
+**What is solid:** the measured state and the disturbance. `d̂` reproduces
+amplitude, shape and phase over all four periods, and is insensitive to which
+basin the parameters land in — `â` is pinned by a well-conditioned final
+residual, so it does not share their fate.
+
+**What is not:** the state–parameter split. `θ` errors range 0.077–0.234 across
+seeds (33–100% relative), and `s0`/`s1` differ 2.1× in `θ` while their
+objectives differ by 0.6%. See the degeneracy analysis below.
+
+Compared with `automatica_n4`, the shorter chain improves the disturbance
+**4.1×** (one fewer integration between `d` and `y`) and halves the degenerate
+family from two dimensions to one — both predicted in advance by
+`eval/observability.py` and the null-space argument, respectively.
 
 `automatica_n4` ([source](src/pibe/systems/examples/automatica_n4.py),
 [config](configs/automatica_n4.yaml)):
@@ -205,36 +247,112 @@ vanishes (~1e-30, not 0), and cell 2's data term equals the realised noise
 variance — a floor no honest estimator beats. A *trained* cell-2 data term
 below that floor means the decoder is fitting noise.
 
-## Why identification is hard here (and where it comes from)
+## What limits accuracy on this system — an experimental answer
 
-At every cell `k ≤ n`, the physics residual
+Roughly thirty training runs were used to isolate what bounds PIBE's accuracy on
+`automatica_n4`. The short answer: **it is the Remark 7 degeneracy, and it is
+structural.** It is not noise, fitting, capacity, horizon, resolution or schedule.
+
+### The degeneracy, concretely
+
+At every cell `k <= n`, the physics residual
 
 ```
 ẋ̂_{k-1} = x̂_k + f_{k-1}(·, θ̂_{k-1})
 ```
 
-is **one equation in two unknowns** — the new state `x̂_k` and the parameter
-`θ̂_{k-1}`. That is a one-parameter family the local loss cannot choose within,
-and it is exactly the counterexample Remark 7 constructs. The observable
-signature is an estimate drifting along the flat direction until it *saturates
-at the boundary* of its admissible box, where tanh kills the gradient — a `θ̂`
-sitting exactly on an endpoint with spread ~1e-7.
+is one equation in two unknowns — the new state `x̂_k` and the parameter
+`θ̂_{k-1}`. Because `x̂_k` is a *free function*, the residual can be driven to
+zero for **any** `θ̂_{k-1}` by setting
+`x̂_k = ẋ_{k-1} − f_{k-1}(x_{k-1}, θ_{k-1}+e)`. The compensating shift inherits
+the time-variation of `∂f_{k-1}/∂θ_{k-1}` (22% here), and that is measurable:
+predicted offset `+0.075` with scatter `4.0e-3`, observed `+0.084` / `1.83e-2`.
 
-**The only closure in the bank is the final cell.** There the auxiliary state is
-pinned by its consistency target, so `â` is the sole free variable in
-`r_{n+1} = ẋ̂_n − f_n(x̂,θ̂) − Γ_qᵀâ`, which must hold across the whole horizon —
-over-determined, hence identifying. But that cell trains *last*, and its
-information reaches cells `2..n` only through `L^{n+1}_Tot`.
+The bank's **only** closure is the final cell, where the auxiliary state is
+pinned by its consistency target and `â` must fit `r_{n+1}` over the whole
+horizon. But the surviving offsets sit in the **null space of that residual's
+linear part**:
 
-Two consequences, both load-bearing:
+```
+Σ_j COMPANION_j · c_j = +0.0006      (0.045% of the largest term)
+```
 
-- **`final_global_iters` deserves most of the budget.** It extends the final
-  cell's end-to-end phase, which is where the bank actually closes. Measured
-  effect: that phase alone dropped the objective from `1.1257` to `1.28e-3`.
-- **Widening `Θ_j` does not fix boundary pinning.** The direction is flat, so
-  the estimate runs to whatever the new boundary is. Keeping the truth interior
-  (see `THETA_BOUND` vs `THETA_SAMPLING_BOUND`) avoids a *dead gradient*, but
-  the degeneracy itself is broken only by the final cell.
+so the closure is structurally blind to them. `Γ_4` has no DC component, so `â`
+could not absorb a constant either — it does not need to.
+
+The visible signature: the bank reconstructs the *shape* of every unmeasured
+state to 1–3%, offset by one constant per coordinate.
+
+| | RMSE | mean offset | RMSE after removing it |
+|---|---|---|---|
+| `x_1` | 1.53e-03 | +0.001 | 1.39e-03 |
+| `x_2` | 7.91e-02 | +0.079 | **8.68e-03** |
+| `x_3` | 2.92e-01 | −0.291 | **1.88e-02** |
+| `x_4` | 3.19e-01 | +0.318 | **3.04e-02** |
+
+### Every lever, tested
+
+| lever | range tested | effect on `θ` |
+|---|---|---|
+| noise `σ` | 0.01 → 0.002 → **0** | persists at exactly zero noise |
+| horizon `T` | 5 / 20 / 40 | trades `d̂` against `θ̂`; fixes neither |
+| time harmonics `K` | 8 / 10 / 16 / 40 | none, once `1/k` scaling is applied |
+| trajectories `P` | 8 / 16 / 64 / 256 | none |
+| capacity | latent 32 → 96, decoder 64³ → 128³ | none (worse) |
+| schedule | local-only / Algorithm 1 / joint | none |
+| `λ` | 1 / 10 | 10 destabilises |
+| final-phase length | 1.5k → 42k iterations | improves the loss, not `θ` |
+
+The cleanest single experiment is `nf_p8` vs `noisefree`, both noise-free:
+cutting the amortization burden from 51 trajectories to 6 improved the
+objective **7.2×** and `x_1` **2×**, while `θ_3`'s error stayed *identical* to
+five digits. **Fit quality and identification are decoupled.**
+
+### The outcome is bimodal, and the loss cannot tell you which basin you are in
+
+Four seeds of the same configuration (sigma = 0.002, T = 20, K = 10):
+
+| seed | `L_Tot` | `theta_1` | `theta_2` | `theta_3` | `x_3` | `x_1` | basin |
+|---|---|---|---|---|---|---|---|
+| 3 | **7.59e-05** | .064 | .245 | **.420** | .281 | 5.4e-3 | degenerate |
+| 2 | 7.79e-05 | .038 | .066 | .086 | .081 | 5.1e-3 | good |
+| 0 | 8.46e-05 | .058 | .093 | .093 | .097 | 5.6e-3 | good |
+| 1 | 8.98e-05 | .072 | .226 | **.420** | .268 | 5.4e-3 | degenerate |
+
+Two of four seeds converge to a degenerate solution with `theta_3` pinned at the
+boundary of `Theta_3`. The measurement fit is *identical* across all four
+(`x_1` within 5.1-5.6e-3), and — most importantly — **the seed with the lowest
+objective has the worst parameters.** The objective varies 18% while
+`theta_3`'s error varies 5x, and the correlation is negative.
+
+The practical consequence: model selection by training loss, validation loss, or
+measurement fit will not find the identifiable solution, because none of them
+distinguish the basins. Only ground truth does. This is the operational form of
+Assumption 4 being a *hypothesis*: there is no post-training quantity in the
+framework that verifies it.
+
+### Why this is the expected answer
+
+The paper says so. Remark 7 constructs this family explicitly; **Remark 10**
+states that ruling it out "requires a coercivity inequality on the stacked
+state–physics operator, or independent information on each new state" — neither
+of which the PIBE objective supplies. Assumption 4 is labelled "a post-training
+accuracy hypothesis, not a consequence of the Universal Approximation Theorem".
+
+`eval/oracle.py` confirms the objective is not at fault: the true solution
+always scores *better*, so the losses and residuals are correct and the target
+is representable. The optimizer simply has no gradient along the flat direction.
+
+### What would actually fix it
+
+Not a training change. Either extra information (an additional measured
+coordinate; a known initial condition pinning `x(0)`; a constraint on one
+intermediate state), or a system whose degenerate direction is not in the null
+space of the final residual. A useful check before running anything is
+`eval/observability.py`, which reports whether each disturbance coefficient is
+even visible at the output — on this system, `a_3, a_4` sit at 0.18σ and 0.15σ
+at `σ = 0.01`, i.e. below the noise, which Eq. (3)'s `W_Γ = 10·I₄` does not
+reveal.
 
 ### The `local_only` ablation
 

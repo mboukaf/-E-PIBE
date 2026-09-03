@@ -45,6 +45,7 @@ class ArchitectureConfig:
     head_hidden: tuple[int, ...] = (64, 64)
     activation: str = "tanh"
     time_fourier_features: int = 0
+    time_feature_scaling: bool = True
 
     def __post_init__(self) -> None:
         if self.time_fourier_features < 0:

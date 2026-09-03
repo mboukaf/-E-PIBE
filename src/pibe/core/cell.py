@@ -187,6 +187,7 @@ class EstimatorCell(nn.Module):
             hidden=architecture.decoder_hidden,
             activation=architecture.activation,
             time_fourier_features=architecture.time_fourier_features,
+            time_feature_scaling=architecture.time_feature_scaling,
         )
         self.head = ParameterHead(
             latent_dim=architecture.latent_dim,
