@@ -1,0 +1,24 @@
+17:00:34 | INFO    | train_pibe         | experiment:
+system            : automatica_n4(n=4) on cpu (torch.float64)
+true theta        : [0.23502650090327654, 0.10390993219989397, -0.020308528436274564]
+basis             : FourierBasis(q=4, H=2, omega=1.25664, horizon=[0, 20], periods=4)
+  lambda_min(W)   : 1.0000e+01   (Eq. 3, must be > 0)
+  eps_(d,q)       : 0.0000e+00
+noise             : TruncatedGaussianNoise(sigma=0.01, bound=0.03)
+data              : TrajectoryData(P=64, N=201, n=4, horizon=[0, 20])
+  train / val     : 51 / 13
+  data fill h_d   : 5.0000e-02
+  coll fill h_r   : 2.5000e-02
+bank              : cells 2..5, 1046606 parameters
+17:00:34 | INFO    | pibe.training.trainer | joint mode: training cells 2..5 together against L^5_Tot
+17:00:34 | INFO    | pibe.training.trainer | cell 5/5: 1 local iterations then 39999 fine-tuning iterations
+17:00:34 | INFO    | pibe.training.trainer |   cell 5 | i=    0 | local  | obj=2.0707e+01 | data=1.2219e+00 | phys=1.9485e+01 | |g|=5.65e+02
+17:06:21 | INFO    | pibe.training.trainer |   cell 5 | i= 2500 | global | obj=8.5200e-01 | data=2.3695e-02 | phys=2.8451e-03 | |g|=7.14e+00
+17:11:54 | INFO    | pibe.training.trainer |   cell 5 | i= 5000 | global | obj=8.6879e-01 | data=1.4603e-02 | phys=3.1331e-02 | |g|=1.45e+01
+17:18:05 | INFO    | pibe.training.trainer |   cell 5 | i= 7500 | global | obj=8.4328e-01 | data=2.5726e-02 | phys=6.0240e-03 | |g|=1.02e+01
+17:24:14 | INFO    | pibe.training.trainer |   cell 5 | i=10000 | global | obj=8.4557e-01 | data=1.7447e-02 | phys=1.0846e-02 | |g|=5.46e+00
+17:31:04 | INFO    | pibe.training.trainer |   cell 5 | i=12500 | global | obj=8.2930e-01 | data=2.0696e-02 | phys=8.1328e-03 | |g|=4.80e+00
+17:37:46 | INFO    | pibe.training.trainer |   cell 5 | i=15000 | global | obj=8.3571e-01 | data=2.3934e-02 | phys=5.3381e-03 | |g|=3.18e+00
+17:44:12 | INFO    | pibe.training.trainer |   cell 5 | i=17500 | global | obj=8.2925e-01 | data=2.3751e-02 | phys=6.1603e-04 | |g|=3.57e+00
+17:51:07 | INFO    | pibe.training.trainer |   cell 5 | i=20000 | global | obj=8.2941e-01 | data=2.7726e-02 | phys=6.6081e-03 | |g|=2.14e+00
+17:56:34 | INFO    | pibe.training.trainer |   cell 5 | i=22500 | global | obj=8.3577e-01 | data=2.4097e-02 | phys=3.0979e-03 | |g|=1.26e+00

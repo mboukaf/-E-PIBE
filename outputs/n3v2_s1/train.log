@@ -1,0 +1,78 @@
+11:01:48 | INFO    | train_pibe         | experiment:
+system            : automatica_n3v2(n=3) on cpu (torch.float64)
+true theta        : [0.23502650090327654, 0.10390993219989397]
+basis             : FourierBasis(q=3, H=2, omega=1.25664, horizon=[0, 20], periods=4)
+  lambda_min(W)   : 1.0000e+01   (Eq. 3, must be > 0)
+  eps_(d,q)       : 0.0000e+00
+noise             : TruncatedGaussianNoise(sigma=0.002, bound=0.006)
+data              : TrajectoryData(P=64, N=201, n=3, horizon=[0, 20])
+  train / val     : 51 / 13
+  data fill h_d   : 5.0000e-02
+  coll fill h_r   : 2.5000e-02
+bank              : cells 2..4, 271850 parameters
+11:01:49 | INFO    | train_pibe         | disturbance observability  (sigma = 0.002, N = 201)
+  i |       gain |    settled |  signature |     SNR |  eff SNR |
+----------------------------------------------------------------------------
+  1 |  1.472e-01 |  1.395e-01 |  2.511e-02 |   12.56 |   178.03 |
+  2 |  1.369e-01 |  1.401e-01 |  2.522e-02 |   12.61 |   178.81 |
+  3 |  4.558e-02 |  3.413e-02 |  4.096e-03 |    2.05 |    29.04 |
+
+every basis function is observable above the noise floor.
+11:01:49 | INFO    | pibe.training.trainer | cell 2/4: 3000 local iterations then 3000 fine-tuning iterations
+11:01:49 | INFO    | pibe.training.trainer |   cell 2 | i=    0 | local  | obj=3.4129e+00 | data=2.2658e+00 | phys=1.1471e+00 | |g|=5.41e+01
+11:02:31 | INFO    | pibe.training.trainer |   cell 2 | i= 3000 | global | obj=4.0765e-04 | data=2.8011e-04 | phys=1.2755e-04 | |g|=6.23e-02
+11:03:13 | INFO    | pibe.training.trainer |   cell 2 | i= 5999 | global | obj=1.9700e-04 | data=1.4473e-04 | phys=5.2269e-05 | |g|=2.33e-03
+11:03:13 | INFO    | pibe.training.trainer |   cell 2 done in 84.1s | val local=3.7239e-04 (data=2.3762e-04, phys=1.3477e-04)
+11:03:13 | INFO    | pibe.training.trainer | cell 3/4: 3000 local iterations then 3000 fine-tuning iterations
+11:03:13 | INFO    | pibe.training.trainer |   cell 3 | i=    0 | local  | obj=1.3815e+00 | data=5.5163e-01 | phys=8.2990e-01 | |g|=1.54e+01
+11:04:12 | INFO    | pibe.training.trainer |   cell 3 | i= 3000 | global | obj=1.3417e-04 | data=1.4862e-05 | phys=1.0597e-05 | |g|=2.86e-02
+11:05:36 | INFO    | pibe.training.trainer |   cell 3 | i= 5999 | global | obj=6.3164e-05 | data=5.0929e-06 | phys=4.1437e-06 | |g|=5.53e-03
+11:05:36 | INFO    | pibe.training.trainer |   cell 3 done in 143.7s | val local=6.1085e-05 (data=3.3283e-05, phys=2.7802e-05)
+11:05:36 | INFO    | pibe.training.trainer | cell 4/4: 3000 local iterations then 3000 fine-tuning iterations
+11:05:36 | INFO    | pibe.training.trainer |   cell 4 | i=    0 | local  | obj=1.3511e+01 | data=1.7432e-02 | phys=1.3494e+01 | |g|=6.60e+01
+11:06:51 | INFO    | pibe.training.trainer |   cell 4 | i= 3000 | global | obj=1.3772e+00 | data=1.2160e+00 | phys=1.6113e-01 | |g|=1.47e+01
+11:08:58 | INFO    | pibe.training.trainer |   cell 4 | i= 6000 | global | obj=3.6679e-04 | data=1.3043e-05 | phys=1.3652e-04 | |g|=4.54e-01
+11:11:08 | INFO    | pibe.training.trainer |   cell 4 | i= 9000 | global | obj=1.0503e-04 | data=1.2237e-05 | phys=1.3375e-05 | |g|=4.85e-02
+11:13:20 | INFO    | pibe.training.trainer |   cell 4 | i=12000 | global | obj=9.0183e-05 | data=5.5245e-06 | phys=4.7681e-05 | |g|=7.07e-02
+11:15:32 | INFO    | pibe.training.trainer |   cell 4 | i=15000 | global | obj=5.4330e-05 | data=8.0564e-06 | phys=6.4612e-06 | |g|=1.10e-01
+11:17:43 | INFO    | pibe.training.trainer |   cell 4 | i=18000 | global | obj=2.7517e-05 | data=3.2878e-06 | phys=3.7895e-06 | |g|=6.79e-02
+11:19:52 | INFO    | pibe.training.trainer |   cell 4 | i=21000 | global | obj=2.5893e-05 | data=2.7628e-06 | phys=7.2238e-06 | |g|=8.86e-02
+11:22:06 | INFO    | pibe.training.trainer |   cell 4 | i=24000 | global | obj=1.4388e-04 | data=9.2881e-06 | phys=5.4575e-05 | |g|=3.19e-01
+11:24:14 | INFO    | pibe.training.trainer |   cell 4 | i=27000 | global | obj=9.5240e-06 | data=5.2218e-07 | phys=7.5193e-07 | |g|=1.01e-02
+11:26:21 | INFO    | pibe.training.trainer |   cell 4 | i=30000 | global | obj=8.1479e-06 | data=5.4862e-07 | phys=7.1495e-07 | |g|=1.57e-02
+11:28:28 | INFO    | pibe.training.trainer |   cell 4 | i=33000 | global | obj=7.6299e-06 | data=4.8693e-07 | phys=6.4402e-07 | |g|=5.05e-03
+11:30:35 | INFO    | pibe.training.trainer |   cell 4 | i=35999 | global | obj=7.7317e-06 | data=4.3003e-07 | phys=5.2216e-07 | |g|=2.12e-03
+11:30:35 | INFO    | pibe.training.trainer |   cell 4 done in 1498.2s | val local=5.0849e-06 (data=1.0506e-06, phys=4.0344e-06)
+11:30:35 | INFO    | train_pibe         | train metrics:
+state errors (L2 / sup):
+  x_1: 1.8969e-03 / 2.9525e-02
+  x_2: 2.9091e-02 / 2.0537e-01
+  x_3: 3.2736e-02 / 4.4912e-01
+parameter errors (|err| / spread):
+  theta_1: 1.8522e-02 / 1.9228e-02
+  theta_2: 1.6102e-02 / 1.6598e-02
+disturbance: L2=1.1391e-02, sup=3.0210e-02
+output fit: L2=2.7927e-03
+11:30:35 | INFO    | train_pibe         | val metrics:
+state errors (L2 / sup):
+  x_1: 2.5875e-03 / 4.3663e-02
+  x_2: 3.2034e-02 / 1.6042e-01
+  x_3: 3.2656e-02 / 3.5421e-01
+parameter errors (|err| / spread):
+  theta_1: 2.0124e-02 / 2.1731e-02
+  theta_2: 1.7886e-02 / 1.9269e-02
+disturbance: L2=1.0558e-02, sup=2.0857e-02
+output fit: L2=3.3592e-03
+11:30:37 | INFO    | train_pibe         | oracle comparison (train):
+ cell |   L_Loc @ truth | L_Loc @ trained | winner
+------------------------------------------------------------
+    2 |      3.9417e-06 |      9.6697e-06 | truth
+    3 |      5.4714e-36 |      1.0906e-06 | truth
+    4 |      1.5075e-34 |      9.6234e-07 | truth
+------------------------------------------------------------
+L_Tot @ truth   : 2.3907e-06
+L_Tot @ trained : 7.6767e-06
+noise floor     : 3.8933e-06 (the cell-2 data term cannot honestly go below this)
+
+verdict: optimization failure: the true solution attains a lower objective than training reached, so it is representable and preferred but was not found. Lengthen end-to-end fine-tuning (lower N_par / raise lr_global) and check that no head is pinned to the boundary of its admissible box.
+11:30:37 | INFO    | train_pibe         | artifacts written to outputs/n3v2_s1

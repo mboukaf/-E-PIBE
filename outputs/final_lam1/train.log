@@ -1,0 +1,86 @@
+16:04:45 | INFO    | train_pibe         | experiment:
+system            : automatica_n4(n=4) on cpu (torch.float64)
+true theta        : [0.23502650090327654, 0.10390993219989397, -0.020308528436274564]
+basis             : FourierBasis(q=4, H=2, omega=1.25664, horizon=[0, 20], periods=4)
+  lambda_min(W)   : 1.0000e+01   (Eq. 3, must be > 0)
+  eps_(d,q)       : 0.0000e+00
+noise             : TruncatedGaussianNoise(sigma=0.01, bound=0.03)
+data              : TrajectoryData(P=64, N=201, n=4, horizon=[0, 20])
+  train / val     : 51 / 13
+  data fill h_d   : 5.0000e-02
+  coll fill h_r   : 2.5000e-02
+bank              : cells 2..5, 409102 parameters
+16:04:45 | INFO    | pibe.training.trainer | cell 2/5: 2500 local iterations then 2500 fine-tuning iterations
+16:04:46 | INFO    | pibe.training.trainer |   cell 2 | i=    0 | local  | obj=1.2270e+01 | data=1.1876e+01 | phys=3.9366e-01 | |g|=7.56e+02
+16:05:14 | INFO    | pibe.training.trainer |   cell 2 | i= 2000 | local  | obj=2.9535e-03 | data=2.7684e-03 | phys=1.8510e-04 | |g|=2.04e+00
+16:05:44 | INFO    | pibe.training.trainer |   cell 2 | i= 4000 | global | obj=2.4033e-03 | data=2.2422e-03 | phys=1.6114e-04 | |g|=2.27e+00
+16:05:59 | INFO    | pibe.training.trainer |   cell 2 | i= 4999 | global | obj=3.8105e-04 | data=3.6016e-04 | phys=2.0890e-05 | |g|=3.79e-01
+16:05:59 | INFO    | pibe.training.trainer |   cell 2 done in 74.1s | val local=7.1046e-04 (data=6.5458e-04, phys=5.5878e-05)
+16:05:59 | INFO    | pibe.training.trainer | cell 3/5: 2500 local iterations then 2500 fine-tuning iterations
+16:05:59 | INFO    | pibe.training.trainer |   cell 3 | i=    0 | local  | obj=6.8766e-01 | data=1.7433e-01 | phys=5.1333e-01 | |g|=1.62e+01
+16:06:43 | INFO    | pibe.training.trainer |   cell 3 | i= 2000 | local  | obj=4.9067e-05 | data=2.9082e-05 | phys=1.9985e-05 | |g|=1.43e-02
+16:07:43 | INFO    | pibe.training.trainer |   cell 3 | i= 4000 | global | obj=2.3183e-04 | data=6.1820e-06 | phys=1.0338e-05 | |g|=3.69e-02
+16:08:17 | INFO    | pibe.training.trainer |   cell 3 | i= 4999 | global | obj=4.2688e-04 | data=7.5342e-05 | phys=7.6672e-06 | |g|=3.96e-01
+16:08:17 | INFO    | pibe.training.trainer |   cell 3 done in 138.3s | val local=3.8422e-04 (data=3.5319e-04, phys=3.1025e-05)
+16:08:17 | INFO    | pibe.training.trainer | cell 4/5: 2500 local iterations then 2500 fine-tuning iterations
+16:08:18 | INFO    | pibe.training.trainer |   cell 4 | i=    0 | local  | obj=2.1486e+00 | data=1.1655e+00 | phys=9.8315e-01 | |g|=1.58e+01
+16:09:18 | INFO    | pibe.training.trainer |   cell 4 | i= 2000 | local  | obj=9.1137e-05 | data=5.6582e-05 | phys=3.4554e-05 | |g|=1.12e-01
+16:10:49 | INFO    | pibe.training.trainer |   cell 4 | i= 4000 | global | obj=1.8060e-04 | data=2.6992e-06 | phys=4.5629e-06 | |g|=3.70e-02
+16:11:39 | INFO    | pibe.training.trainer |   cell 4 | i= 4999 | global | obj=2.2330e-04 | data=6.9376e-06 | phys=5.8576e-06 | |g|=9.35e-02
+16:11:39 | INFO    | pibe.training.trainer |   cell 4 done in 201.9s | val local=2.6126e-05 (data=1.5923e-05, phys=1.0203e-05)
+16:11:39 | INFO    | pibe.training.trainer | cell 5/5: 2500 local iterations then 2500 fine-tuning iterations
+16:11:39 | INFO    | pibe.training.trainer |   cell 5 | i=    0 | local  | obj=2.7714e+00 | data=1.7500e+00 | phys=1.0214e+00 | |g|=9.08e+01
+16:13:17 | INFO    | pibe.training.trainer |   cell 5 | i= 2000 | local  | obj=1.1303e+00 | data=1.0429e+00 | phys=8.7434e-02 | |g|=5.73e-01
+16:15:59 | INFO    | pibe.training.trainer |   cell 5 | i= 4000 | global | obj=5.4229e-03 | data=1.5342e-04 | phys=4.3464e-03 | |g|=4.84e+00
+16:19:04 | INFO    | pibe.training.trainer |   cell 5 | i= 6000 | global | obj=2.6496e-04 | data=9.0786e-06 | phys=9.7192e-06 | |g|=3.77e-02
+16:22:16 | INFO    | pibe.training.trainer |   cell 5 | i= 8000 | global | obj=1.3505e-03 | data=7.9723e-06 | phys=6.1543e-04 | |g|=1.82e+00
+16:25:26 | INFO    | pibe.training.trainer |   cell 5 | i=10000 | global | obj=1.6331e-03 | data=1.3525e-04 | phys=6.0856e-04 | |g|=9.41e-01
+16:28:38 | INFO    | pibe.training.trainer |   cell 5 | i=12000 | global | obj=1.1192e-03 | data=4.3049e-05 | phys=6.4855e-04 | |g|=1.77e+00
+16:32:11 | INFO    | pibe.training.trainer |   cell 5 | i=14000 | global | obj=5.3012e-04 | data=3.4232e-05 | phys=1.9496e-04 | |g|=1.10e+00
+16:35:33 | INFO    | pibe.training.trainer |   cell 5 | i=16000 | global | obj=2.4191e-04 | data=7.6471e-06 | phys=6.2489e-06 | |g|=7.99e-02
+16:38:50 | INFO    | pibe.training.trainer |   cell 5 | i=18000 | global | obj=4.1361e-04 | data=1.0667e-05 | phys=1.4578e-04 | |g|=8.84e-01
+16:41:57 | INFO    | pibe.training.trainer |   cell 5 | i=20000 | global | obj=1.9375e-04 | data=5.0430e-06 | phys=4.7121e-06 | |g|=1.68e-01
+16:45:30 | INFO    | pibe.training.trainer |   cell 5 | i=22000 | global | obj=4.5605e-04 | data=4.4058e-06 | phys=1.4969e-04 | |g|=6.91e-01
+16:48:46 | INFO    | pibe.training.trainer |   cell 5 | i=24000 | global | obj=3.8684e-04 | data=1.2555e-05 | phys=1.2027e-04 | |g|=7.25e-01
+16:51:56 | INFO    | pibe.training.trainer |   cell 5 | i=26000 | global | obj=2.2084e-04 | data=5.6919e-06 | phys=3.7931e-06 | |g|=6.84e-02
+16:55:07 | INFO    | pibe.training.trainer |   cell 5 | i=28000 | global | obj=7.4288e-04 | data=4.6484e-05 | phys=3.8752e-04 | |g|=1.63e+00
+16:58:13 | INFO    | pibe.training.trainer |   cell 5 | i=29999 | global | obj=2.0319e-04 | data=5.9952e-06 | phys=3.2345e-06 | |g|=1.03e-01
+16:58:13 | INFO    | pibe.training.trainer |   cell 5 done in 2793.1s | val local=5.9748e-05 (data=2.3680e-05, phys=3.6068e-05)
+16:58:13 | INFO    | train_pibe         | train metrics:
+state errors (L2 / sup):
+  x_1: 1.2998e-02 / 9.3473e-02
+  x_2: 1.4274e-01 / 4.7622e-01
+  x_3: 2.0669e-01 / 7.3130e-01
+  x_4: 1.6949e-01 / 5.4768e-01
+parameter errors (|err| / spread):
+  theta_1: 1.6443e-01 / 5.3079e-04
+  theta_2: 2.1965e-01 / 3.3422e-03
+  theta_3: 1.9245e-01 / 1.2482e-03
+disturbance: L2=1.3110e-01, sup=2.3281e-01
+output fit: L2=1.6010e-02
+16:58:13 | INFO    | train_pibe         | val metrics:
+state errors (L2 / sup):
+  x_1: 1.3741e-02 / 6.4158e-02
+  x_2: 1.4032e-01 / 3.7664e-01
+  x_3: 2.0946e-01 / 8.1576e-01
+  x_4: 1.7397e-01 / 5.8715e-01
+parameter errors (|err| / spread):
+  theta_1: 1.6400e-01 / 1.0792e-03
+  theta_2: 2.1920e-01 / 6.4268e-03
+  theta_3: 1.9204e-01 / 1.6875e-03
+disturbance: L2=1.3104e-01, sup=2.3345e-01
+output fit: L2=1.7242e-02
+16:58:16 | INFO    | train_pibe         | oracle comparison (train):
+ cell |   L_Loc @ truth | L_Loc @ trained | winner
+------------------------------------------------------------
+    2 |      9.7379e-05 |      2.7913e-04 | truth
+    3 |      6.8946e-36 |      3.6152e-05 | truth
+    4 |      7.6615e-36 |      1.5631e-05 | truth
+    5 |      1.8597e-34 |      8.7417e-06 | truth
+------------------------------------------------------------
+L_Tot @ truth   : 5.3443e-05
+L_Tot @ trained : 1.9896e-04
+noise floor     : 9.7334e-05 (the cell-2 data term cannot honestly go below this)
+
+verdict: optimization failure: the true solution attains a lower objective than training reached, so it is representable and preferred but was not found. Lengthen end-to-end fine-tuning (lower N_par / raise lr_global) and check that no head is pinned to the boundary of its admissible box.
+16:58:16 | INFO    | train_pibe         | artifacts written to outputs/final_lam1
