@@ -10,7 +10,13 @@ import torch
 from pibe.basis.bspline import BSplineBasis
 from pibe.data.dataset import TrajectoryBatcher, generate_dataset
 from pibe.data.disturbance import BasisDisturbance, sample_coefficients
-from pibe.data.noise import NoiseFree, TruncatedGaussianNoise
+from pibe.data.noise import (
+    NOISE_FAMILIES,
+    BiasedNoise,
+    NoiseFree,
+    TruncatedGaussianNoise,
+    build_noise_model,
+)
 from pibe.data.simulate import (
     check_admissible,
     fill_distance,
@@ -113,6 +119,74 @@ def test_truncated_gaussian_variance_matches_the_closed_form() -> None:
 def test_noise_free_model() -> None:
     assert NoiseFree().bound == 0.0
     assert float(NoiseFree().sample((10,)).abs().max()) == 0.0
+
+
+# ----------------------------------------------------------------------
+# non-Gaussian laws
+# ----------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("family", sorted(NOISE_FAMILIES))
+def test_every_family_is_calibrated_and_compactly_supported(family: str) -> None:
+    """Matched standard deviation and an honest support bound.
+
+    Calibration is what makes the families comparable: any difference an
+    experiment shows between them is then a difference of *shape*, not of noise
+    power.  The bound is Section 2's :math:`\bar w`, so a draw outside it would
+    put the data outside the class the analysis covers.
+    """
+    noise = build_noise_model(family, 0.1)
+    sample = noise.sample((400_000,), generator=make_generator(0))
+    assert float(sample.std(unbiased=False)) == pytest.approx(0.1, rel=2e-2)
+    assert float(sample.abs().max()) <= noise.bound
+
+
+@pytest.mark.parametrize("family", sorted(NOISE_FAMILIES))
+def test_every_family_is_zero_mean(family: str) -> None:
+    """Proposition 1's premise: no systematic term in the quadratic data loss."""
+    noise = build_noise_model(family, 0.1)
+    sample = noise.sample((400_000,), generator=make_generator(1))
+    assert abs(float(sample.mean())) < 2e-3
+
+
+def test_families_differ_in_shape_at_matched_variance() -> None:
+    """The point of the comparison: equal variance, very different tails."""
+    kurtosis = {}
+    for family in ("uniform", "gaussian", "laplace", "contaminated"):
+        sample = build_noise_model(family, 0.1).sample(
+            (400_000,), generator=make_generator(2)
+        )
+        z = (sample - sample.mean()) / sample.std(unbiased=False)
+        kurtosis[family] = float((z**4).mean())
+    assert kurtosis["uniform"] < kurtosis["gaussian"] < kurtosis["laplace"]
+    assert kurtosis["contaminated"] > kurtosis["laplace"]
+    assert kurtosis["gaussian"] == pytest.approx(3.0, abs=0.3)
+
+
+def test_skewed_law_is_asymmetric() -> None:
+    """Zero mean but nonzero third moment, which isolates skew from bias."""
+    sample = build_noise_model("skewed", 0.1).sample(
+        (400_000,), generator=make_generator(3)
+    )
+    z = (sample - sample.mean()) / sample.std(unbiased=False)
+    assert float((z**3).mean()) > 0.5
+    assert abs(float(sample.mean())) < 2e-3
+
+
+def test_bias_shifts_the_mean_and_the_support() -> None:
+    """The case PIBE does not cover; EPIBE (Section 3.2) is the answer to it."""
+    base = build_noise_model("gaussian", 0.1)
+    noise = BiasedNoise(base, bias=2.0)  # in units of sigma
+    sample = noise.sample((200_000,), generator=make_generator(4))
+    assert float(sample.mean()) == pytest.approx(0.2, abs=5e-3)
+    assert noise.bound == pytest.approx(base.bound + 0.2)
+    assert float(sample.abs().max()) <= noise.bound
+
+
+def test_build_noise_model_rejects_unknown_families() -> None:
+    with pytest.raises(ValueError, match="unknown noise family"):
+        build_noise_model("cauchy", 0.1)
+    assert isinstance(build_noise_model("gaussian", 0.0), NoiseFree)
 
 
 # ----------------------------------------------------------------------
