@@ -11,6 +11,7 @@ dependencies = [
     "torch>=2.9",
     "numpy>=1.26",
     "pyyaml>=6.0",
+    "matplotlib>=3.8",   # figures are written at the end of every run
 ]
 
 [project.optional-dependencies]

@@ -37,3 +37,42 @@ every basis function is observable above the noise floor.
 11:44:19 | INFO    | pibe.training.trainer |   cell 4 | i=15000 | global | obj=4.3196e-05 | data=2.4249e-06 | phys=1.7144e-05 | |g|=1.60e-01
 11:46:32 | INFO    | pibe.training.trainer |   cell 4 | i=18000 | global | obj=2.1607e-05 | data=1.4518e-06 | phys=3.8160e-06 | |g|=4.28e-02
 11:48:44 | INFO    | pibe.training.trainer |   cell 4 | i=21000 | global | obj=1.4875e-05 | data=1.0490e-06 | phys=2.1517e-06 | |g|=1.91e-02
+11:50:54 | INFO    | pibe.training.trainer |   cell 4 | i=24000 | global | obj=1.3311e-05 | data=1.0513e-06 | phys=1.7346e-06 | |g|=2.31e-02
+11:53:03 | INFO    | pibe.training.trainer |   cell 4 | i=27000 | global | obj=1.3520e-05 | data=5.4149e-07 | phys=2.6015e-06 | |g|=4.47e-02
+11:54:48 | INFO    | pibe.training.trainer |   cell 4 | i=30000 | global | obj=9.0753e-06 | data=4.1901e-07 | phys=8.1851e-07 | |g|=9.10e-03
+11:56:21 | INFO    | pibe.training.trainer |   cell 4 | i=33000 | global | obj=8.6895e-06 | data=3.3590e-07 | phys=6.7325e-07 | |g|=6.63e-03
+11:57:53 | INFO    | pibe.training.trainer |   cell 4 | i=35999 | global | obj=7.5120e-06 | data=3.3905e-07 | phys=5.4082e-07 | |g|=9.87e-04
+11:57:53 | INFO    | pibe.training.trainer |   cell 4 done in 1405.7s | val local=6.1029e-06 (data=9.1366e-07, phys=5.1892e-06)
+11:57:53 | INFO    | train_pibe         | train metrics:
+state errors (L2 / sup):
+  x_1: 2.0506e-03 / 3.1995e-02
+  x_2: 3.4187e-02 / 1.8635e-01
+  x_3: 3.7558e-02 / 5.6572e-01
+parameter errors (|err| / spread):
+  theta_1: 2.2317e-02 / 2.3764e-02
+  theta_2: 1.9307e-02 / 2.0376e-02
+disturbance: L2=1.3419e-02, sup=4.0550e-02
+output fit: L2=2.8996e-03
+11:57:53 | INFO    | train_pibe         | val metrics:
+state errors (L2 / sup):
+  x_1: 2.8483e-03 / 3.9344e-02
+  x_2: 3.8624e-02 / 1.4096e-01
+  x_3: 3.9323e-02 / 4.0918e-01
+parameter errors (|err| / spread):
+  theta_1: 2.4688e-02 / 2.6760e-02
+  theta_2: 2.1683e-02 / 2.3442e-02
+disturbance: L2=1.2817e-02, sup=3.5136e-02
+output fit: L2=3.5223e-03
+11:57:54 | INFO    | train_pibe         | oracle comparison (train):
+ cell |   L_Loc @ truth | L_Loc @ trained | winner
+------------------------------------------------------------
+    2 |      3.9417e-06 |      1.0277e-05 | truth
+    3 |      5.4714e-36 |      1.0681e-06 | truth
+    4 |      1.5075e-34 |      9.8451e-07 | truth
+------------------------------------------------------------
+L_Tot @ truth   : 2.3907e-06
+L_Tot @ trained : 8.0498e-06
+noise floor     : 3.8933e-06 (the cell-2 data term cannot honestly go below this)
+
+verdict: optimization failure: the true solution attains a lower objective than training reached, so it is representable and preferred but was not found. Lengthen end-to-end fine-tuning (lower N_par / raise lr_global) and check that no head is pinned to the boundary of its admissible box.
+11:57:54 | INFO    | train_pibe         | artifacts written to outputs/n3v2_s2

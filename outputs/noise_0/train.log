@@ -1,0 +1,16 @@
+16:29:30 | INFO    | train_pibe         | experiment:
+system            : automatica_n3v2(n=3) on cpu (torch.float64)
+true theta        : [0.23502650090327654, 0.10390993219989397]
+disturbance       : one a shared by all trajectories
+basis             : FourierBasis(q=3, H=2, omega=1.25664, horizon=[0, 20], periods=4)
+  lambda_min(W)   : 1.0000e+01   (Eq. 3, must be > 0)
+  eps_(d,q)       : 0.0000e+00
+noise             : NoiseFree()
+data              : TrajectoryData(P=64, N=201, n=3, horizon=[0, 20])
+  train / val     : 51 / 13
+  data fill h_d   : 5.0000e-02
+  coll fill h_r   : 2.5000e-02
+bank              : cells 2..4, 271850 parameters
+16:29:30 | WARNING | train_pibe         | training.checkpoint_every is 0, so this run cannot be resumed; set it to a few thousand for a cluster job
+16:29:30 | INFO    | pibe.training.trainer | cell 2/4: 3000 local iterations then 3000 fine-tuning iterations
+16:29:31 | INFO    | pibe.training.trainer |   cell 2 | i=    0 | local  | obj=1.2052e+01 | data=1.1755e+01 | phys=2.9725e-01 | |g|=7.45e+01

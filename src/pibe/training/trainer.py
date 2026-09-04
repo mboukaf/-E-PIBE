@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
+from pathlib import Path
 
 import torch
 from torch import Tensor
@@ -45,7 +46,12 @@ from pibe.config import TrainingConfig
 from pibe.core.bank import EstimatorBank, Mode
 from pibe.core.losses import CellLoss, total_loss
 from pibe.data.dataset import TrajectoryBatcher, TrajectoryData
-from pibe.training.callbacks import History, IterationRecord
+from pibe.training.callbacks import (
+    History,
+    IterationRecord,
+    load_training_state,
+    save_training_state,
+)
 from pibe.training.phases import apply_phase, mode_for_iteration
 from pibe.utils.logging import get_logger
 
@@ -89,6 +95,7 @@ class PIBETrainer:
         val_data: TrajectoryData | None = None,
         generator: torch.Generator | None = None,
         history: History | None = None,
+        checkpoint_path: Path | None = None,
     ) -> None:
         if train_data.n_samples != bank.n_samples:
             raise ValueError(
@@ -104,6 +111,9 @@ class PIBETrainer:
         self.t_coll = t_coll
         self.config = config
         self.history = history if history is not None else History()
+        self.checkpoint_path = checkpoint_path
+        self.generator = generator
+        self._resume: dict | None = None
         self.batcher = TrajectoryBatcher(
             n_trajectories=train_data.n_trajectories,
             batch_size=config.batch_size,
@@ -115,6 +125,35 @@ class PIBETrainer:
     # outer loop
     # ------------------------------------------------------------------
 
+    def resume(self) -> tuple[int, int]:
+        """Restore from ``checkpoint_path`` if present; return where to continue.
+
+        Returns ``(cell_index, iteration)`` --- the point training stopped, so
+        the caller resumes at the *next* iteration.  Restores the optimizer
+        moments, the LR-schedule position, the history and both RNG streams, not
+        only the weights: on a preempted cluster job the difference between
+        resuming and restarting a cell is hours.
+        """
+        if self.checkpoint_path is None:
+            return (2, 0)
+        state = load_training_state(self.checkpoint_path)
+        if state is None:
+            return (2, 0)
+        self.bank.load_state_dict(state["state_dict"])
+        self.bank.to(device=self.train_data.x.device, dtype=self.train_data.x.dtype)
+        self.history = History.from_dict(state.get("history", {}))
+        if state.get("generator") is not None and self.generator is not None:
+            self.generator.set_state(state["generator"])
+        if state.get("torch_rng") is not None:
+            torch.set_rng_state(state["torch_rng"])
+        self._resume = state
+        cell, iteration = int(state["cell_index"]), int(state["iteration"])
+        logger.info(
+            "resuming from %s at cell %d, iteration %d (%s phase)",
+            self.checkpoint_path, cell, iteration + 1, state.get("mode", "?"),
+        )
+        return (cell, iteration + 1)
+
     def train(self) -> History:
         """Run the full procedure over cells ``2..n+1`` (lines 1-18).
 
@@ -122,18 +161,22 @@ class PIBETrainer:
         the global regime already optimizes every cell ``2..n+1`` against
         :math:`\mathcal{L}^{n+1}_{Tot}`, which is exactly joint training.
         """
+        start_cell, start_iteration = self.resume()
         if self.config.joint:
             logger.info(
                 "joint mode: training cells 2..%d together against L^%d_Tot",
                 self.bank.final_index, self.bank.final_index,
             )
-            self.train_cell(self.bank.final_index)
+            self.train_cell(self.bank.final_index, start_iteration=start_iteration)
             return self.history
         for cell_index in self.bank.cell_indices:
-            self.train_cell(cell_index)
+            if cell_index < start_cell:
+                continue
+            begin = start_iteration if cell_index == start_cell else 0
+            self.train_cell(cell_index, start_iteration=begin)
         return self.history
 
-    def train_cell(self, cell_index: int) -> None:
+    def train_cell(self, cell_index: int, start_iteration: int = 0) -> None:
         """Train one cell through both regimes (lines 2-17)."""
         config = self.config
         started = time.perf_counter()
@@ -167,7 +210,7 @@ class PIBETrainer:
         active: list[torch.nn.Parameter] = []
         current_mode: Mode | None = None
 
-        for iteration in range(total_iterations):
+        for iteration in range(start_iteration, total_iterations):
             mode = mode_for_iteration(
                 iteration, config.n_par, local_only=config.local_only
             )
@@ -187,6 +230,14 @@ class PIBETrainer:
                     if config.lr_schedule == "cosine"
                     else None
                 )
+                # Resuming mid-phase: restore the optimizer moments and the
+                # schedule position rather than restarting them.
+                if self._resume is not None and self._resume.get("mode") == mode.value:
+                    if self._resume.get("optimizer") is not None:
+                        optimizer.load_state_dict(self._resume["optimizer"])
+                    if scheduler is not None and self._resume.get("scheduler") is not None:
+                        scheduler.load_state_dict(self._resume["scheduler"])
+                    self._resume = None
                 current_mode = mode
                 logger.debug(
                     "cell %d entering %s phase with %d trainable tensors",
@@ -199,6 +250,17 @@ class PIBETrainer:
             result = self.step(cell_index, mode, optimizer, active)
             if scheduler is not None:
                 scheduler.step()
+
+            if (
+                self.checkpoint_path is not None
+                and config.checkpoint_every > 0
+                and (iteration + 1) % config.checkpoint_every == 0
+            ):
+                save_training_state(
+                    self.checkpoint_path, self.bank, optimizer, scheduler,
+                    cell_index=cell_index, iteration=iteration, mode=mode.value,
+                    history=self.history, generator=self.generator,
+                )
 
             if config.log_every > 0 and (
                 iteration % config.log_every == 0 or iteration == total_iterations - 1

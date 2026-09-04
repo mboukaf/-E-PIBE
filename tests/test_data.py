@@ -166,7 +166,10 @@ def test_dataset_shapes_and_output_equation() -> None:
     data = build_dataset()
     assert data.x.shape == (10, 24, 3)
     assert data.y.shape == (10, 24)
-    assert data.d.shape == (24,)
+    # d is per trajectory: Eq. (2)'s ``a`` is an unknown to be inferred from y,
+    # so a shared disturbance would let the coefficient head learn a constant.
+    assert data.d.shape == (10, 24)
+    assert data.theta.shape == (10, 2)
     residual = (data.y - data.x[..., 0]).abs().max()
     assert float(residual) <= 3.0 * 0.02 + 1e-12
 
@@ -203,3 +206,71 @@ def test_generate_dataset_requires_ground_truth_parameters() -> None:
     system.theta_true = None
     with pytest.raises(ValueError, match="theta_true"):
         generate_dataset(system, uniform_grid(0.0, 1.0, 5), 2)
+
+
+# ----------------------------------------------------------------------
+# per-trajectory disturbances
+# ----------------------------------------------------------------------
+
+
+def test_disturbance_can_differ_per_trajectory() -> None:
+    r"""Each trajectory carries its own ``a``, as Eq. (2) intends.
+
+    The paper notes that :math:`\hat a^\ell` "may differ between trajectories",
+    which only means something if the *true* ``a`` does too.  With one shared
+    ``a`` the coefficient head can satisfy the objective by emitting a constant,
+    and the disturbance-estimation problem is never posed.
+    """
+    system = SinChainSystem(n=3)
+    basis = BSplineBasis(q=5, degree=3, t_start=0.0, t_end=3.0)
+    generator = make_generator(0)
+    coefficients = torch.rand(10, 5, generator=generator, dtype=torch.float64) - 0.5
+    data = generate_dataset(
+        system=system, t_grid=uniform_grid(0.0, 3.0, 24), n_trajectories=10,
+        disturbance=BasisDisturbance(basis, coefficients), generator=generator,
+    )
+    assert data.d.shape == (10, 24)
+    assert data.coefficients is not None and data.coefficients.shape == (10, 5)
+    # Distinct coefficients must give distinct disturbances, hence distinct states.
+    assert float((data.d[0] - data.d[1]).abs().max()) > 1e-6
+    assert torch.allclose(data.coefficients, coefficients)
+
+
+def test_split_carries_matching_coefficients() -> None:
+    """A subset's truth must follow it, or the oracle scores the wrong ``a``."""
+    system = SinChainSystem(n=3)
+    basis = BSplineBasis(q=5, degree=3, t_start=0.0, t_end=3.0)
+    generator = make_generator(1)
+    coefficients = torch.rand(10, 5, generator=generator, dtype=torch.float64) - 0.5
+    data = generate_dataset(
+        system=system, t_grid=uniform_grid(0.0, 3.0, 24), n_trajectories=10,
+        disturbance=BasisDisturbance(basis, coefficients), generator=generator,
+    )
+    train, val = data.split(0.7, generator=make_generator(2))
+    assert train.coefficients.shape == (7, 5)
+    assert val.coefficients.shape == (3, 5)
+    # Every row of the split must be a row of the original, paired with its own d.
+    for subset in (train, val):
+        for i in range(len(subset)):
+            match = (data.coefficients == subset.coefficients[i]).all(dim=1).nonzero()
+            assert match.numel() == 1
+            assert torch.allclose(data.d[int(match)], subset.d[i])
+
+
+def test_per_trajectory_theta_broadcasts_through_the_vector_field() -> None:
+    r"""``theta`` of shape ``(P, n-1)`` must align with the trajectory axis.
+
+    ``x`` may carry a time axis ``(P, M, n)``; a per-trajectory ``theta`` has to
+    be inserted before it, not misread as a time axis.
+    """
+    system = SinChainSystem(n=3)
+    torch.manual_seed(0)
+    x = torch.randn(4, 7, 3, dtype=torch.float64)
+    theta = torch.randn(4, 2, dtype=torch.float64) * 0.2
+    d = torch.zeros(4, 7, dtype=torch.float64)
+    out = system.vector_field(x, theta, d)
+    assert out.shape == (4, 7, 3)
+    # Row p must equal the field evaluated with that row's parameters alone.
+    for p in range(4):
+        single = system.vector_field(x[p], theta[p], d[p])
+        assert torch.allclose(out[p], single, atol=1e-14)

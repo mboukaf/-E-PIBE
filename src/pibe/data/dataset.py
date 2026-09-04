@@ -42,9 +42,19 @@ class TrajectoryData:
         the vector :math:`\mathbf{Y}^\ell` of Eq. (13) and the sole input to
         the first cell.
     d
-        True disturbance on the data grid, shape ``(N,)``.
+        True disturbance on the data grid, shape ``(P, N)``.  Per trajectory,
+        because Eq. (2)'s ``a`` is an unknown the estimator must *infer* from
+        ``y``; a single shared disturbance would let the coefficient head learn
+        a constant instead.
     theta
-        True parameters, shape ``(n - 1,)``.
+        True parameters, shape ``(P, n - 1)``.  Per trajectory for the same
+        reason when parameters are sampled; broadcast when they are shared.
+    coefficients
+        True disturbance coefficients ``a``, shape ``(P, q)``.  Carried here so
+        the dataset is self-contained: after a train/val split the disturbance
+        *object* still holds every trajectory's coefficients, so anything
+        needing the truth for a subset (the oracle, the metrics) must read it
+        from the subset itself.
     """
 
     t: Tensor
@@ -52,6 +62,7 @@ class TrajectoryData:
     y: Tensor
     d: Tensor
     theta: Tensor
+    coefficients: Tensor | None = None
 
     def __post_init__(self) -> None:
         p, n_samples, _ = self.x.shape
@@ -59,8 +70,17 @@ class TrajectoryData:
             raise ValueError(f"t must have shape ({n_samples},), got {tuple(self.t.shape)}")
         if self.y.shape != (p, n_samples):
             raise ValueError(f"y must have shape {(p, n_samples)}, got {tuple(self.y.shape)}")
-        if self.d.shape != (n_samples,):
-            raise ValueError(f"d must have shape ({n_samples},), got {tuple(self.d.shape)}")
+        if self.d.shape != (p, n_samples):
+            raise ValueError(f"d must have shape {(p, n_samples)}, got {tuple(self.d.shape)}")
+        if self.theta.shape != (p, self.x.shape[2] - 1):
+            raise ValueError(
+                f"theta must have shape {(p, self.x.shape[2] - 1)}, "
+                f"got {tuple(self.theta.shape)}"
+            )
+        if self.coefficients is not None and self.coefficients.shape[0] != p:
+            raise ValueError(
+                f"coefficients must have {p} rows, got {self.coefficients.shape[0]}"
+            )
 
     @property
     def n_trajectories(self) -> int:
@@ -86,9 +106,11 @@ class TrajectoryData:
         return self.n_trajectories
 
     def select(self, index: Tensor) -> TrajectoryData:
-        """A view onto a subset of trajectories (``t``, ``d``, ``theta`` shared)."""
+        """A view onto a subset of trajectories; ``d`` and ``theta`` follow it."""
         return TrajectoryData(
-            t=self.t, x=self.x[index], y=self.y[index], d=self.d, theta=self.theta
+            t=self.t, x=self.x[index], y=self.y[index],
+            d=self.d[index], theta=self.theta[index],
+            coefficients=None if self.coefficients is None else self.coefficients[index],
         )
 
     def split(
@@ -112,6 +134,8 @@ class TrajectoryData:
             y=self.y.to(device=device, dtype=dtype),
             d=self.d.to(device=device, dtype=dtype),
             theta=self.theta.to(device=device, dtype=dtype),
+            coefficients=None if self.coefficients is None
+            else self.coefficients.to(device=device, dtype=dtype),
         )
 
     def __repr__(self) -> str:  # pragma: no cover - trivial
@@ -131,6 +155,7 @@ def generate_dataset(
     generator: torch.Generator | None = None,
     substeps: int = 8,
     check_bounds: bool = True,
+    theta: Tensor | None = None,
 ) -> TrajectoryData:
     """Generate trajectories and noisy measurements, Eq. (135).
 
@@ -149,6 +174,9 @@ def generate_dataset(
     check_bounds
         Verify Assumption 1 (trajectories remain in :math:`\\chi`) and raise
         otherwise.
+    theta
+        Per-trajectory parameters, shape ``(P, n - 1)``.  Defaults to the
+        system's ``theta_true`` broadcast over trajectories.
     """
     if system.theta_true is None:
         raise ValueError(
@@ -158,12 +186,21 @@ def generate_dataset(
     noise = noise or NoiseFree()
     d_fn = disturbance if disturbance is not None else system.disturbance
 
+    if theta is None:
+        theta = system.theta_true.reshape(1, -1).expand(n_trajectories, -1).clone()
+    theta = torch.as_tensor(theta, dtype=system.state_bounds.dtype)
+    if theta.shape != (n_trajectories, system.theta_dim):
+        raise ValueError(
+            f"theta must have shape {(n_trajectories, system.theta_dim)}, "
+            f"got {tuple(theta.shape)}"
+        )
+
     x0 = system.sample_x0(n_trajectories, generator=generator)
     x = rk4_integrate(
         system,
         t_grid=t_grid,
         x0=x0,
-        theta=system.theta_true,
+        theta=theta,
         disturbance=d_fn,
         substeps=substeps,
     )
@@ -178,8 +215,14 @@ def generate_dataset(
     )
     y = system.output(x) + omega
 
+    d_true = d_fn(t_grid)
+    if d_true.ndim == 1:                      # shared disturbance
+        d_true = d_true.reshape(1, -1).expand(n_trajectories, -1).clone()
+    coefficients = getattr(d_fn, "coefficients", None)
+    if coefficients is not None and coefficients.shape[0] == 1:
+        coefficients = coefficients.expand(n_trajectories, -1).clone()
     return TrajectoryData(
-        t=t_grid, x=x, y=y, d=d_fn(t_grid), theta=system.theta_true.clone()
+        t=t_grid, x=x, y=y, d=d_true, theta=theta, coefficients=coefficients
     )
 
 

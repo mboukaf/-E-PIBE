@@ -31,7 +31,11 @@ class BasisDisturbance:
     basis
         The basis :math:`\Gamma_q`.
     coefficients
-        The true ``a``, shape ``(q,)``.
+        The true ``a``.  Shape ``(q,)`` for a disturbance shared by every
+        trajectory, or ``(P, q)`` to give each trajectory its own --- which is
+        the general case, since Eq. (2)'s ``a`` is an *unknown* vector the
+        estimator must infer from ``y``.  Training on a single ``a`` turns the
+        coefficient head into a constant map and never poses that problem.
     remainder
         Optional :math:`r_q`, a callable ``t -> (...)``.  Defaults to zero, the
         case in which the finite-dimensional disturbance class is recovered
@@ -44,24 +48,42 @@ class BasisDisturbance:
         coefficients: Tensor,
         remainder: Callable[[Tensor], Tensor] | None = None,
     ) -> None:
-        coefficients = torch.as_tensor(coefficients, dtype=basis.dtype).reshape(-1)
-        if coefficients.numel() != basis.q:
+        coefficients = torch.as_tensor(coefficients, dtype=basis.dtype)
+        if coefficients.ndim == 1:
+            coefficients = coefficients.reshape(1, -1)
+            self.per_trajectory = False
+        elif coefficients.ndim == 2:
+            self.per_trajectory = True
+        else:
             raise ValueError(
-                f"expected {basis.q} coefficients for this basis, got {coefficients.numel()}"
+                f"coefficients must be (q,) or (P, q), got {tuple(coefficients.shape)}"
+            )
+        if coefficients.shape[-1] != basis.q:
+            raise ValueError(
+                f"expected {basis.q} coefficients for this basis, "
+                f"got {coefficients.shape[-1]}"
             )
         self.basis = basis
         self.coefficients = coefficients.to(basis.device)
         self.remainder = remainder
 
     def __call__(self, t: Tensor) -> Tensor:
-        value = self.basis.evaluate(t) @ self.coefficients
+        """Evaluate ``d`` at ``t``.
+
+        Returns ``(...)`` for shared coefficients and ``(P, ...)`` when each
+        trajectory carries its own, so the batch axis lines up with the state
+        during integration.
+        """
+        value = self.structured_part(t)
         if self.remainder is not None:
             value = value + self.remainder(t)
         return value
 
     def structured_part(self, t: Tensor) -> Tensor:
         r"""Only :math:`\Gamma_q(t)^\top a`, the part the estimator can represent."""
-        return self.basis.evaluate(t) @ self.coefficients
+        gamma = self.basis.evaluate(t)                    # (..., q)
+        value = torch.einsum("...q,pq->p...", gamma, self.coefficients)
+        return value[0] if not self.per_trajectory else value
 
     def remainder_bound(self, t: Tensor) -> float:
         r"""Empirical :math:`\varepsilon_{d,q} \approx \|r_q\|_{L^\infty}` on ``t``."""

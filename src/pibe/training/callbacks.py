@@ -47,6 +47,14 @@ class History:
             "validation": self.validation,
         }
 
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "History":
+        """Rebuild a history from :meth:`to_dict` (used when resuming)."""
+        return cls(
+            iterations=[IterationRecord(**r) for r in payload.get("iterations", [])],
+            validation=list(payload.get("validation", [])),
+        )
+
     def save(self, path: Path | str) -> None:
         """Write the history as JSON."""
         path = Path(path)
@@ -73,3 +81,52 @@ def load_checkpoint(path: Path | str, bank: nn.Module) -> dict[str, Any]:
     payload = torch.load(path, map_location="cpu", weights_only=False)
     bank.load_state_dict(payload["state_dict"])
     return payload.get("metadata", {})
+
+
+def save_training_state(
+    path: Path | str,
+    bank: nn.Module,
+    optimizer: torch.optim.Optimizer | None,
+    scheduler: Any,
+    cell_index: int,
+    iteration: int,
+    mode: str,
+    history: "History",
+    generator: torch.Generator | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    """Write everything needed to resume training exactly where it stopped.
+
+    Cluster jobs are preempted and time-limited, so a long run must be able to
+    continue rather than restart.  Saving only the weights is not enough: Adam's
+    moments and the LR schedule's position materially affect the trajectory, and
+    the minibatch RNG must continue rather than replay.
+
+    Written to a temporary file and renamed, so a job killed mid-write leaves
+    the previous checkpoint intact rather than a truncated one.
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "state_dict": bank.state_dict(),
+        "optimizer": None if optimizer is None else optimizer.state_dict(),
+        "scheduler": None if scheduler is None else scheduler.state_dict(),
+        "cell_index": int(cell_index),
+        "iteration": int(iteration),
+        "mode": mode,
+        "history": history.to_dict(),
+        "generator": None if generator is None else generator.get_state(),
+        "torch_rng": torch.get_rng_state(),
+        "metadata": metadata or {},
+    }
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    torch.save(payload, tmp)
+    tmp.replace(path)
+
+
+def load_training_state(path: Path | str) -> dict[str, Any] | None:
+    """Read a resume checkpoint, or ``None`` if there is none to read."""
+    path = Path(path)
+    if not path.exists():
+        return None
+    return torch.load(path, map_location="cpu", weights_only=False)

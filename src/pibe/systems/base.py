@@ -234,6 +234,13 @@ class TriangularSystem(ABC):
             raise ValueError(
                 f"expected parameters of width {self.theta_dim}, got {theta.shape[-1]}"
             )
+        # Broadcast theta against x's batch shape.  Parameters may be shared
+        # ``(n-1,)`` or per trajectory ``(P, n-1)``, while x may carry a time
+        # axis ``(P, M, n)``; insert singleton axes before the last so a
+        # per-trajectory theta lines up with the trajectory axis rather than
+        # being misread as a time axis.
+        while theta.ndim < x.ndim:
+            theta = theta.unsqueeze(-2)
         theta = theta.expand(*x.shape[:-1], self.theta_dim)
 
         rows = [

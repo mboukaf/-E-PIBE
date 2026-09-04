@@ -1,0 +1,69 @@
+system:
+  name: automatica_n4v2
+  kwargs:
+    theta_seed: 0
+data:
+  n_trajectories: 64
+  n_samples: 201
+  horizon: 20.0
+  substeps: 8
+  noise_sigma: 0.002
+  noise_bound: null
+  noise_truncation_sigmas: 3.0
+  train_fraction: 0.8
+  seed: 1
+  sample_disturbance_per_trajectory: false
+  sample_theta_per_trajectory: false
+basis:
+  kind: fourier
+  q: 4
+  degree: null
+  knot_style: null
+  omega: 1.2566370614359172
+  coeff_lo:
+  - -0.15
+  - -0.15
+  - -0.12
+  - -0.12
+  coeff_hi:
+  - 0.15
+  - 0.15
+  - 0.12
+  - 0.12
+  remainder_amplitude: 0.0
+  remainder_rate: 0.15
+architecture:
+  latent_dim: 32
+  encoder_hidden:
+  - 128
+  - 128
+  decoder_hidden:
+  - 64
+  - 64
+  - 64
+  head_hidden:
+  - 64
+  - 64
+  activation: tanh
+  time_fourier_features: 10
+  time_feature_scaling: true
+training:
+  n_total: 6000
+  n_par: 3000
+  lam: 1.0
+  n_collocation: 401
+  batch_size: 16
+  lr_local: 0.001
+  lr_global: 0.0005
+  weight_decay: 0.0
+  grad_clip: 1.0
+  log_every: 250
+  seed: 0
+  local_only: false
+  joint: false
+  lr_schedule: cosine
+  final_global_iters: 30000
+device: auto
+dtype: float64
+seed: 0
+output_dir: outputs/n4v2

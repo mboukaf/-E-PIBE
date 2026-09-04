@@ -299,7 +299,12 @@ A test measures this: unscaled, harmonic 16's derivative is 16.0× harmonic 1's;
 scaled, the ratio is 1.00. Expressiveness is unchanged — the network learns a
 correspondingly larger weight.
 
-`K = 10` with scaling is the setting used.
+`K = 10` with scaling is the setting used. Raising it further does **not** help
+identification: at `K = 24` (same seed) the objective improves 1.8x to 1.20e-05
+— the best of any run — while `θ` gets 1.7x *worse* (8.64e-03 vs 5.03e-03). The
+extra resolution buys a better fit to the initial transient and nothing else,
+which is the fit/identification decoupling of §2.6 appearing even in the
+well-conditioned regime.
 
 ## 2.3 `final_global_iters` — budget where the bank actually closes
 
@@ -429,20 +434,183 @@ X_1 = [−2.5, 2.5]     (stronger θ-coupling drives x_1 to ~2.02)
 
 `f_3`, the poles, `Γ_3`, `T`, `Ω` and all coefficient ranges unchanged.
 
-| | rev 1 (best seed) | **rev 2, seed 0** | improvement |
-|---|---|---|---|
-| `θ_1` (true 0.235) | 0.0767 | **0.00503** — 2.1% rel. | **15×** |
-| `θ_2` (true 0.104) | 0.0773 | **0.00452** — 4.4% rel. | **17×** |
-| `x_2` (unmeasured) | 0.0731 | **0.0110** | 6.6× |
-| `x_3` (unmeasured) | 0.0649 | **0.0192** | 3.4× |
-| `d` L² | 9.48e-03 | **7.11e-03** | 1.3× |
-| `γ_2` / `γ_3` | 0.36 / 0.49 | **0.99 / 2.07** | — |
+Three seeds, held-out trajectories, `σ = 0.002`:
+
+| | rev 1 (best of 3) | rev 2 s0 | rev 2 s1 | rev 2 s2 |
+|---|---|---|---|---|
+| `θ_1` (true 0.235) | 0.0767 | **0.00503** | 0.0201 | 0.0247 |
+| `θ_2` (true 0.104) | 0.0773 | **0.00452** | 0.0179 | 0.0217 |
+| `x_2` (unmeasured) | 0.0731 | **0.0110** | 0.0320 | 0.0386 |
+| `x_3` (unmeasured) | 0.0649 | **0.0192** | 0.0327 | 0.0393 |
+| `d` L² * | 9.48e-03 | 7.11e-03 | 1.06e-02 | 1.28e-02 |
+| `γ_2` / `γ_3` | 0.36 / 0.49 | 0.99 / 2.07 | — | — |
+
+\* These disturbance figures were obtained with a *single shared* `a` and are
+superseded by §2.7 — with `a` sampled per trajectory they degrade about 13x.
+The parameter columns are unaffected in kind and degrade only ~2.5x.
+
+The **worst** new seed beats the **best** old one by 3x on every parameter, and
+no seed shows the boundary pin: head spreads are ~2e-2, not ~1e-7. Best seed
+reaches 2.1% and 4.4% relative error on `θ`.
 
 The offsets are gone: `x_2` mean offset **+0.003**, `x_3` **−0.010** (were
 −0.155 / +0.127). Removing the offset no longer changes the RMSE (1.586e-2 →
 1.548e-2), where before it collapsed it 10×. The error structure changed
 qualitatively — the residual is now concentrated in the first ~1.5 s, i.e. the
 initial transient, not a systematic bias.
+
+### Why: the fourth-order objective does not identify `theta`
+
+The definitive measurement is a **profile of the objective**
+(`scripts/profile_theta.py`): clamp `theta_1` at an offset, let every other
+weight — including `theta_2`, `theta_3` and `a` — re-optimize to compensate,
+and record the best achievable `L_Tot`. Each point warm-starts from the same
+converged checkpoint so the points are comparable.
+
+| `theta_1` offset | 3D (`n3v2`) | 4D (`n4` rev1) |
+|---|---|---|
+| −0.100 | 3.71e-05 | 4.13e-05 ← *minimum* |
+| −0.050 | 1.38e-05 | 4.23e-05 |
+| **0.000** | **5.39e-06** ← minimum | 4.40e-05 |
+| +0.050 | 1.03e-05 | 4.53e-05 |
+| +0.100 | 1.90e-05 | 4.55e-05 |
+| ratio | **6.89x** | **0.94x** |
+
+**3D is identifiable**: a clean minimum at the true value, rising 6.89x.
+**4D is not**: flat to within ±3%, and *monotone* — the objective mildly
+**prefers a wrong parameter**. There is nothing for an optimizer to find.
+
+That single fact explains every fourth-order observation:
+
+- **Seed variance dominates.** Three seeds of the identical rev-1 configuration
+  give `theta_1` errors 0.058 / 0.318 / 0.034 — a 9.4x spread. With a flat
+  profile, where a run lands is chance.
+- **Loss does not track accuracy.** `s2` has both the lowest loss and the best
+  parameters; `s1` has a *lower* loss than `s0` and far worse parameters.
+- **No design change helped**, because none of them were addressing the
+  binding constraint.
+
+Good fourth-order results are therefore attainable but not *reproducible*:
+seed 2 reaches `theta` errors (0.034, 0.013, 0.0099), the best of any 4D run,
+by landing near the truth inside the flat region. Reporting that seed alone
+would be misleading.
+
+### Methodological note: three failed diagnostics before a valid one
+
+Worth recording, because each failure mode is easy to repeat.
+
+1. **Curvature proxy** — reconstructs the chain exactly, so it cannot see the
+   slack the network's *soft* consistency terms provide. Over-predicted 4D
+   gains that training never delivered.
+2. **Profile along `(1,1,1)`** — clamping every parameter at a *common* offset
+   probes a direction nearly orthogonal to the degenerate one, whose components
+   have opposite signs. Reported a steep 55.8x for a system that is in fact
+   flat.
+3. **Profile trained from scratch** — 4000 iterations per point measures
+   convergence luck, not geometry. Caught by the 3D control, where `e = 0`
+   scored *worse* than `e = ±0.12`, which is impossible for a profile.
+
+Only the fourth version — one parameter clamped, others free, all points
+warm-started from a common checkpoint — produced a profile with its minimum at
+the truth on the control. **Running a case whose answer is already known is what
+caught errors 2 and 3.**
+
+## 2.7 Correction: the disturbance must vary across trajectories
+
+An earlier version of this work generated **one** disturbance shared by every
+trajectory. That is a mis-specification of the problem, not merely a narrow
+test setting.
+
+Eq. (2)'s `a` is an *unknown* the estimator has to infer from `y`, and the paper
+states that `â^ℓ` "may differ between trajectories" — which is only meaningful
+if the true `a` differs too. With a single shared `a`, the coefficient head
+`𝒬_{n+1}: z_n → â` can drive the objective down by emitting a **constant**, and
+the disturbance-estimation problem is never posed at all.
+
+Sampling `a` independently per trajectory (`sample_disturbance_per_trajectory`,
+now the default) changes the result decisively:
+
+| | shared `a` | per-trajectory `a` (s0 / s1) |
+|---|---|---|
+| **`d` L²** | 7.11e-03 | **9.31e-02 / 1.02e-01** — 13x worse |
+| `θ_1` | 5.03e-03 | 1.35e-02 / 1.78e-02 |
+| `θ_2` | 4.52e-03 | 1.10e-02 / 1.51e-02 |
+| `x_1` | 2.17e-03 | 8.12e-03 / 9.51e-03 |
+
+Relative `d` error is 79% on average, and the head is visibly collapsing toward
+a constant rather than inferring:
+
+```
+â   spread across trajectories:  0.0630  0.0420  0.0109
+true a spread:                   0.1064  0.1152  0.0759
+```
+
+`â` varies only 59% / 36% / 14% as much as the truth, worst for `a_3` — which
+is also the least observable component (the 2Ω harmonic, see §2.5).
+
+**The 7.11e-03 disturbance figure was substantially memorization and must not be
+reported.** The parameter result survives the correction: `θ` degrades only
+~2.5x and stays at 5.8% / 10.6% relative error, which is the right outcome,
+since `θ` genuinely *is* a single system constant while `a` is not.
+
+`sample_theta_per_trajectory` exists but is off by default: `θ` is a constant of
+the system, so varying it asks the bank to identify an *unseen system*, which is
+strictly harder than Eq. (1) poses.
+
+### Two defaults changed under existing checkpoints
+
+Twice in this work a default was changed while trained checkpoints existed —
+`time_feature_scaling` (§2.2) and `sample_disturbance_per_trajectory` here. In
+both cases reloading an old checkpoint silently reinterpreted it: weights
+learned against unscaled features evaluated with scaled ones, and weights
+trained on a shared `a` scored against per-trajectory data. The first produced
+an apparent catastrophic-overfitting result that was purely an artifact.
+
+Every run's `config.resolved.yaml` now records both flags explicitly, so a
+checkpoint is always evaluated under the settings it was trained with. The
+general lesson: **a config that omits a setting inherits today's default, not
+the one in force when it ran.** Resolved configs must be exhaustive.
+
+### It did not transfer to the fourth-order system
+
+The same procedure was applied to `automatica_n4`: measure candidate designs,
+pick the highest curvature, retrain. **It made things worse.**
+
+| | `n4` rev1 (best) | `n4v2` m=(1,6,10) s0 | s1 | `n4v3` m=(1,4,6) s0 |
+|---|---|---|---|---|
+| predicted gain | 1.0x | 27.5x | 27.5x | 9.1x |
+| `θ_1` | **0.058** | 0.152 | 0.377 | 0.144 |
+| `θ_2` | **0.093** | 0.236 | 0.037 | 0.261 |
+| `θ_3` | **0.093** | 0.367 | 0.391 | 0.398 |
+| `x_1` | 5.56e-03 | 6.74e-03 | 1.13e-02 | 6.56e-03 |
+| `L_Tot` | 8.46e-05 | 1.04e-04 | 8.73e-04 | 8.16e-05 |
+
+Note especially `n4v3`: essentially the **same** objective and the same `x_1`
+fit as revision 1, yet `θ` three times worse. So this is not a fittability
+penalty from the faster sensitivities — identification degraded at equal fit
+quality, the opposite of the prediction.
+
+**The curvature proxy is therefore not reliable for the longer chain.** It
+predicted 25.7x for `n = 3` and delivered; it predicted 9.1-27.5x for `n = 4`
+and the trained result moved the other way. Candidate explanations, none
+verified:
+
+- the fourth-order degenerate family is 2-D rather than 1-D, so there are more
+  escape directions than a one-parameter reconstruction models;
+- the network's consistency terms are soft, giving slack the exact-chain
+  reconstruction does not represent;
+- three successive numerical differentiations make the `n = 4` measurement
+  noisier than the `n = 3` one.
+
+**Status of the criterion: validated on the third-order system; inapplicable to
+the fourth-order one, whose objective does not identify `theta` at all** (the
+profile above). The fourth-order failure is therefore *not* evidence against the
+criterion — the criterion addresses the shape of a minimum that, at `n = 4`,
+does not exist. It should be presented as a design heuristic supported by the
+third-order result and the mechanism in §2.0, not as a general principle. The
+honest recommendation for the paper is the third-order system, where the
+criterion was derived, verified across three seeds, and where the disturbance
+is also 4.1x better recovered because of the shorter chain.
 
 ---
 
@@ -454,12 +622,15 @@ initial transient, not a systematic bias.
 | 2 | Fourier time features, `1/k`-scaled | architectural | `x̂_1` resolution gates `d̂`; measured 2.4× / 2.5× |
 | 3 | `final_global_iters` | schedule | the final cell is the only closure; 1.13 → 1.28e-3 |
 | 4 | oracle + observability diagnostics | tooling | separate optimisation from identifiability failure |
-| 5 | **sensitivity design criterion** | **methodological** | `γ_k > 0` insufficient; 25.7× measured |
+| 5 | **sensitivity design criterion** | **methodological, `n = 3` only** | `γ_k > 0` insufficient; 25.7× measured and confirmed on `n = 3`; **did not transfer to `n = 4`** |
 
-Item 5 is the one that belongs in the paper as a contribution. It gives
-Remark 7 a constructive resolution the paper currently lacks, strengthens
-Assumption 6 into something a designer can act on, and is verifiable in
-advance by the curvature measurement described in §2.6.
+Item 5 is the one that belongs in the paper as a contribution — with its scope
+stated honestly. It gives Remark 7 a constructive resolution on the third-order
+system, strengthens Assumption 6 into something a designer can act on, and the
+mechanism (a constant compensating shift lying in the null space of the final
+residual) is exact. But the curvature proxy used to *choose* a design did not
+predict the fourth-order outcome, so the criterion is evidenced by one system,
+not established in general.
 
 **A caveat on framing.** `automatica_n3v2` was designed *because* it is
 identifiable, so it should not be presented as a neutral benchmark. The honest

@@ -124,18 +124,29 @@ def oracle_losses(
     physics terms are evaluated at the same points training uses.
     """
     x_data = data.x
+    # Truth is per trajectory: each carries its own ``a`` (and possibly its own
+    # ``theta``), so the exact solution must be built from ``data``, not from
+    # the system's single nominal value.
+    theta = data.theta
+    # Rebuild the disturbance from the *subset's own* coefficients: after a
+    # train/val split the passed-in object still carries every trajectory's.
+    if data.coefficients is not None:
+        disturbance = BasisDisturbance(
+            basis, data.coefficients, remainder=disturbance.remainder
+        )
     x_coll = rk4_integrate(
         system,
         t_grid=t_coll,
         x0=x_data[:, 0, :],
-        theta=system.theta_true,
+        theta=theta,
         disturbance=disturbance,
         substeps=substeps,
     )
     n_traj, n_coll = x_coll.shape[0], t_coll.numel()
-    d_coll = disturbance(t_coll).expand(n_traj, n_coll)
-    x_dot = system.vector_field(x_coll, system.theta_true, d_coll)
-    theta = system.theta_true.expand(n_traj, system.theta_dim)
+    d_coll = disturbance(t_coll)
+    if d_coll.ndim == 1:
+        d_coll = d_coll.reshape(1, -1).expand(n_traj, n_coll)
+    x_dot = system.vector_field(x_coll, theta, d_coll)
     final = system.n + 1
 
     def make(prev: int, new: int | None, head: Tensor) -> CellOutput:
@@ -152,9 +163,11 @@ def oracle_losses(
     outputs = {
         k: make(k - 1, k, theta[:, [k - 2]]) for k in range(2, system.n + 1)
     }
-    outputs[final] = make(
-        system.n, None, disturbance.coefficients.expand(n_traj, basis.q)
-    )
+    coefficients = disturbance.coefficients
+    if coefficients.shape[0] == 1:
+        coefficients = coefficients.expand(n_traj, basis.q)
+    coefficients = coefficients.to(x_data.dtype)
+    outputs[final] = make(system.n, None, coefficients)
 
     losses: dict[int, CellLoss] = {}
     for k in range(2, final + 1):

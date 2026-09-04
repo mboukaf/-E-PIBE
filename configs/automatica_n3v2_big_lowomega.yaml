@@ -1,0 +1,104 @@
+# PIBE on the third-order benchmark -- large cluster run, LOW-FREQUENCY variant.
+#
+# Identical to configs/automatica_n3v2_big.yaml except Omega: 2*pi/5 -> 2*pi/10.
+#
+# Why: the plant is strongly low-pass (poles -0.6, -0.9, -1.2; DC gain 1.54),
+# so a disturbance placed lower in frequency leaves a much stronger trace at the
+# output.  Measured per-coefficient SNR at sigma=0.002 (eval/observability.py):
+#
+#     Omega = 2pi/5   (4 periods):  a1 12.56   a2 12.61   a3  3.07
+#     Omega = 2pi/10  (2 periods):  a1 27.60   a2 27.33   a3 12.56
+#
+# a_3 is the 2*Omega component, the one the q=3 runs never recovered
+# (corr(a_hat, a) ~ 0 at every P tried).  Lowering Omega raises its SNR 4x.
+#
+# The horizon stays commensurate (2 whole periods), so W_Gamma = (T/2) I = 10 I
+# exactly as before -- Eq. (3) conditioning is unchanged.  The only cost is
+# fewer periods to average over, 4 -> 2.
+#
+# Differences from configs/automatica_n3v2.yaml, and why:
+#
+#   n_trajectories 64 -> 2048
+#       With `a` sampled per trajectory the final cell must learn a regression
+#       from the trajectory code to `a_hat`, and 51 training trajectories is far
+#       too few.  Measured on the small network: 51 -> 205 halved the disturbance
+#       error and lifted corr(a_hat, a) for the fundamental from 0.71/0.82 to
+#       1.00/1.00.  205 -> 410 added nothing at that capacity, so this run pairs
+#       more data with a larger network to find where the pair saturates.
+#
+#   latent 32 -> 128, encoder 128^2 -> 512^2, decoder 64^3 -> 256^3
+#       The coefficient head reads only the latent code, so `r_k` is the channel
+#       through which `a` has to pass.  At 32 it is plausibly the bottleneck.
+#
+#   final_global_iters 30k -> 200k
+#       The final cell is the only place the bank closes (see Docs/IMPLEMENTATION.md
+#       Sec. 2.3); it deserves most of the budget.
+#
+#   batch_size 128 -> 32,  N_r kept at 401
+#       Measured on 8 CPU threads: batch 128 / N_r 401 costs 845 ms per global
+#       step, i.e. 61 h for the full schedule -- more than a 24 h job.  Cutting
+#       the batch to 32 gives 209 ms (15.6 h) while *keeping* the collocation
+#       density, which is the right thing to preserve: the physics residual is
+#       evaluated on that grid, and it carries the identifying information.
+#       On a GPU this constraint disappears; raise batch_size back to 128 and
+#       the wall time falls accordingly.
+#
+#   checkpoint_every: 2000
+#       Makes the run resumable.  Required on a cluster, and the reason the
+#       24 h limit is not fatal even if the estimate is optimistic.
+
+system:
+  name: automatica_n3v2
+  kwargs:
+    theta_seed: 0
+
+data:
+  n_trajectories: 2048
+  n_samples: 201
+  horizon: 20.0
+  substeps: 8
+  noise_sigma: 0.002
+  noise_truncation_sigmas: 3.0
+  train_fraction: 0.8
+  sample_disturbance_per_trajectory: true    # each trajectory gets its own `a`
+  sample_theta_per_trajectory: false         # theta is a constant of the system
+  seed: 1
+
+basis:
+  kind: fourier
+  q: 3
+  omega: 0.6283185307179586        # Omega = 2*pi/10 (2 periods over T)
+  coeff_lo: [-0.18, -0.18, -0.12]
+  coeff_hi: [ 0.18,  0.18,  0.12]
+  remainder_amplitude: 0.0
+  remainder_rate: 0.15
+
+architecture:
+  latent_dim: 128
+  encoder_hidden: [512, 512]
+  decoder_hidden: [256, 256, 256]
+  head_hidden: [128, 128]
+  activation: tanh
+  time_fourier_features: 10
+  time_feature_scaling: true
+
+training:
+  n_total: 20000
+  n_par: 8000
+  final_global_iters: 200000
+  lam: 1.0
+  n_collocation: 401
+  batch_size: 32
+  lr_local: 1.0e-3
+  lr_global: 5.0e-4
+  lr_schedule: cosine
+  weight_decay: 0.0
+  grad_clip: 1.0
+  log_every: 2000
+  checkpoint_every: 2000
+  seed: 0
+
+device: auto      # cuda if present, else cpu (MPS is skipped for float64)
+dtype: float64    # see the sbatch header on trading this for float32
+seed: 0
+output_dir: outputs/big_lowomega

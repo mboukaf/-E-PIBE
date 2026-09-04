@@ -78,7 +78,29 @@ def main() -> int:
         action="store_true",
         help="build the experiment and print its description, then stop",
     )
+    parser.add_argument(
+        "--no-resume",
+        action="store_true",
+        help="ignore any existing state.pt and start over (default is to resume)",
+    )
+    parser.add_argument(
+        "--threads", type=int, default=None,
+        help="torch intra-op threads; on a cluster set this to --cpus-per-task",
+    )
+    parser.add_argument(
+        "--no-plots", action="store_true",
+        help="skip the figures (they are written to <output-dir>/figures by default)",
+    )
+    parser.add_argument(
+        "--plot-trajectory", type=int, default=0,
+        help="which validation trajectory the figures show",
+    )
     args = parser.parse_args()
+
+    import torch
+
+    if args.threads:
+        torch.set_num_threads(args.threads)
 
     import yaml
 
@@ -113,7 +135,20 @@ def main() -> int:
         logger.info("dry run requested; stopping before training")
         return 0
 
+    # Resume checkpoint lives beside the artifacts; its presence is what makes
+    # a preempted cluster job continue instead of restarting.
+    state_path = output_dir / "state.pt"
+    if args.no_resume and state_path.exists():
+        state_path.unlink()
+        logger.info("--no-resume: discarded %s", state_path)
+
     trainer = experiment.make_trainer()
+    trainer.checkpoint_path = state_path
+    if config.training.checkpoint_every <= 0:
+        logger.warning(
+            "training.checkpoint_every is 0, so this run cannot be resumed; "
+            "set it to a few thousand for a cluster job"
+        )
     history = trainer.train()
     history.save(output_dir / "history.json")
     save_checkpoint(
@@ -141,7 +176,28 @@ def main() -> int:
     )
     logger.info("oracle comparison (train):\n%s", comparison.summary())
 
+    # Figures last, and never fatal: a missing matplotlib or a display quirk
+    # must not discard a multi-hour training run that has already succeeded.
+    if not args.no_plots:
+        try:
+            from pibe.eval.figures import write_figures
+
+            written = write_figures(
+                experiment, output_dir / "figures", trajectory=args.plot_trajectory
+            )
+            logger.info("figures: %s", ", ".join(p.name for p in written))
+        except Exception as exc:  # noqa: BLE001 - deliberately non-fatal
+            logger.warning(
+                "figures skipped (%s: %s); training results are unaffected and "
+                "can be plotted later with scripts/plot_results.py --run %s",
+                type(exc).__name__, exc, output_dir,
+            )
+
     logger.info("artifacts written to %s", output_dir)
+    # Training finished, so the resume checkpoint is no longer needed; leaving
+    # it would make a re-submitted job exit immediately instead of retraining.
+    if state_path.exists():
+        state_path.unlink()
     return 0
 
 

@@ -8,6 +8,8 @@ lazily, from :func:`~pibe.systems.registry.build_system`.
 from pibe.systems.examples.automatica_n3 import AutomaticaN3System
 from pibe.systems.examples.automatica_n3v2 import AutomaticaN3V2System
 from pibe.systems.examples.automatica_n4 import AutomaticaN4System
+from pibe.systems.examples.automatica_n4v2 import AutomaticaN4V2System
+from pibe.systems.examples.automatica_n4v3 import AutomaticaN4V3System
 from pibe.systems.examples.sin_chain import SinChainSystem
 
-__all__ = ["AutomaticaN3System", "AutomaticaN3V2System", "AutomaticaN4System", "SinChainSystem"]
+__all__ = ["AutomaticaN3System", "AutomaticaN3V2System", "AutomaticaN4System", "AutomaticaN4V2System", "AutomaticaN4V3System", "SinChainSystem"]

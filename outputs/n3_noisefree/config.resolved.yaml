@@ -12,6 +12,8 @@ data:
   noise_truncation_sigmas: 3.0
   train_fraction: 0.8
   seed: 1
+  sample_disturbance_per_trajectory: false
+  sample_theta_per_trajectory: false
 basis:
   kind: fourier
   q: 3

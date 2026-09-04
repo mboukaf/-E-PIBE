@@ -163,6 +163,18 @@ class DataConfig:
         ``noise_truncation_sigmas * noise_sigma``.
     train_fraction
         Fraction of trajectories in :math:`\Omega^{train}`.
+    sample_disturbance_per_trajectory
+        Draw an independent ``a`` for every trajectory.  This is the general
+        case and the default: Eq. (2)'s ``a`` is an *unknown* the estimator must
+        infer from :math:`y`, and the paper notes that :math:`\hat a^\ell`
+        "may differ between trajectories".  With a single shared ``a`` the
+        coefficient head can satisfy the objective by learning a constant, so
+        the disturbance-estimation problem is never actually posed.
+    sample_theta_per_trajectory
+        Likewise for :math:`\theta`.  Off by default, since :math:`\theta` is
+        a constant of the *system* rather than of a trajectory; turning it on
+        asks the bank to infer parameters for an unseen system, which is a
+        strictly harder problem than Eq. (1) poses.
     """
 
     n_trajectories: int = 64
@@ -173,6 +185,8 @@ class DataConfig:
     noise_bound: float | None = None
     noise_truncation_sigmas: float = 3.0
     train_fraction: float = 0.8
+    sample_disturbance_per_trajectory: bool = True
+    sample_theta_per_trajectory: bool = False
     seed: int = 0
 
     def __post_init__(self) -> None:
@@ -249,6 +263,9 @@ class TrainingConfig:
         from the first step.
 
         Incompatible with ``local_only``.
+    checkpoint_every
+        Write a resumable checkpoint every this many iterations; ``0`` disables
+        it.  Set it on a cluster, where jobs are preempted and time-limited.
     lr_schedule
         ``"none"`` keeps the phase learning rate fixed; ``"cosine"`` anneals it
         to zero over the remaining iterations of the phase.  Annealing matters
@@ -274,6 +291,7 @@ class TrainingConfig:
     joint: bool = False
     lr_schedule: str = "none"
     final_global_iters: int = 0
+    checkpoint_every: int = 0
 
     def __post_init__(self) -> None:
         if self.lr_schedule not in ("none", "cosine"):

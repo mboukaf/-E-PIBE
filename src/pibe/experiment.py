@@ -70,7 +70,13 @@ class Experiment:
         return "\n".join(
             [
                 f"system            : {self.system} on {self.device} ({self.dtype})",
-                f"true theta        : {self.system.theta_true.tolist()}",
+                f"true theta        : {self.system.theta_true.tolist()}"
+                + ("  (sampled per trajectory)"
+                   if self.config.data.sample_theta_per_trajectory else ""),
+                f"disturbance       : "
+                + ("independent a per trajectory"
+                   if self.config.data.sample_disturbance_per_trajectory
+                   else "one a shared by all trajectories"),
                 f"basis             : {self.basis}",
                 f"  lambda_min(W)   : {gamma_d:.4e}   (Eq. 3, must be > 0)",
                 f"  eps_(d,q)       : {self.disturbance.remainder_bound(self.data.t):.4e}",
@@ -128,9 +134,16 @@ def build_experiment(config: RunConfig) -> Experiment:
     # A zero remainder amplitude gives the exactly recoverable case
     # (eps_{d,q} = 0); a nonzero one puts d outside the basis span.
     data_generator = make_generator(config.data.seed)
-    coefficients = sample_coefficients(
-        basis, coefficient_bounds, generator=data_generator
-    )
+    n_traj = config.data.n_trajectories
+    if config.data.sample_disturbance_per_trajectory:
+        unit = torch.rand(n_traj, basis.q, generator=data_generator, dtype=dtype)
+        coefficients = coefficient_bounds[:, 0] + unit * (
+            coefficient_bounds[:, 1] - coefficient_bounds[:, 0]
+        )
+    else:
+        coefficients = sample_coefficients(
+            basis, coefficient_bounds, generator=data_generator
+        )
     remainder = (
         ChirpRemainder(config.basis.remainder_amplitude, config.basis.remainder_rate)
         if config.basis.remainder_amplitude > 0
@@ -142,10 +155,17 @@ def build_experiment(config: RunConfig) -> Experiment:
     # --- data, Eq. (135) ----------------------------------------------
     noise = build_noise(config)
     t_data = uniform_grid(0.0, horizon, config.data.n_samples, dtype=dtype)
+    theta_per_traj = None
+    if config.data.sample_theta_per_trajectory:
+        lo, hi = system.theta_bounds[:, 0], system.theta_bounds[:, 1]
+        unit = torch.rand(n_traj, system.theta_dim, generator=data_generator, dtype=dtype)
+        theta_per_traj = 0.25 * (2.0 * unit - 1.0)
+
     dataset = generate_dataset(
         system=system,
         t_grid=t_data,
         n_trajectories=config.data.n_trajectories,
+        theta=theta_per_traj,
         noise=noise,
         disturbance=disturbance,
         generator=data_generator,
