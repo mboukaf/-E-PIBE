@@ -1,0 +1,64 @@
+.............................F.......................................... [ 25%]
+........................................................................ [ 51%]
+........................................................................ [ 77%]
+.............................................................            [100%]
+=================================== FAILURES ===================================
+______________ test_empirical_maxima_reproduce_the_specification _______________
+
+    @pytest.mark.slow
+    def test_empirical_maxima_reproduce_the_specification() -> None:
+        r"""Randomised sweep over :math:`x_0`, :math:`\theta` and :math:`a`.
+    
+        The specification reports :math:`\max|x_j| \approx (2.65, 0.72, 0.41,
+        0.75)` across 300 random trials.  Reproducing that requires varying all
+        three random inputs --- a single disturbance draw reaches well under the
+        stated maxima, so this is a separate test from the admissibility check
+        above.
+    
+        The direction that matters is the upper one: more sampling can only raise
+        the observed maxima, so the assertion is that they stay below the stated
+        values (with slack) *and* inside :math:`\mathcal{X}`.
+        """
+        system = AutomaticaN4System()
+        basis = FourierBasis(q=4, omega=OMEGA, t_start=0.0, t_end=HORIZON)
+        generator = make_generator(7)
+        t = uniform_grid(0.0, HORIZON, 201)
+    
+        theta_lo, theta_hi = system.theta_bounds[:, 0], system.theta_bounds[:, 1]
+        maxima = torch.zeros(4, dtype=torch.float64)
+        for _ in range(150):
+            unit = torch.rand(4, generator=generator, dtype=torch.float64)
+            coefficients = COEFF_BOUNDS[:, 0] + unit * (
+                COEFF_BOUNDS[:, 1] - COEFF_BOUNDS[:, 0]
+            )
+            theta = theta_lo + torch.rand(
+                3, generator=generator, dtype=torch.float64
+            ) * (theta_hi - theta_lo)
+            x0 = system.sample_x0(1, generator=generator)
+            x = rk4_integrate(
+                system, t, x0, theta, BasisDisturbance(basis, coefficients), substeps=8
+            )
+            maxima = torch.maximum(maxima, x.abs().amax(dim=(0, 1)))
+    
+        stated = torch.tensor([2.65, 0.72, 0.41, 0.75], dtype=torch.float64)
+>       assert bool((maxima <= stated + 0.25).all()), (
+            f"observed maxima {maxima.tolist()} exceed the specification's "
+            f"{stated.tolist()}"
+        )
+E       AssertionError: observed maxima [3.6517300041105343, 0.9698529657597097, 0.48142704813597204, 0.8171857181899411] exceed the specification's [2.65, 0.72, 0.41, 0.75]
+E       assert False
+E        +  where False = bool(tensor(False))
+E        +    where tensor(False) = <built-in method all of Tensor object at 0x1102ed6d0>()
+E        +      where <built-in method all of Tensor object at 0x1102ed6d0> = tensor([3.6517, 0.9699, 0.4814, 0.8172], dtype=torch.float64) <= (tensor([2.6500, 0.7200, 0.4100, 0.7500], dtype=torch.float64) + 0.25).all
+
+tests/test_automatica_n4.py:261: AssertionError
+=============================== warnings summary ===============================
+tests/test_ebm.py::test_projection_makes_the_parameter_set_compact
+  /Users/mboukaf/Thesis/Codes/Automatica/tests/test_ebm.py:81: UserWarning: Converting a tensor with requires_grad=True to a scalar may lead to unexpected behavior.
+  Consider using tensor.detach() first. (Triggered internally at /Users/runner/work/pytorch/pytorch/torch/csrc/autograd/generated/python_variable_methods.cpp:823.)
+    assert max(float(p.abs().max()) for p in ebm.parameters()) <= 2.0
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_automatica_n4.py::test_empirical_maxima_reproduce_the_specification
+1 failed, 276 passed, 1 warning in 363.12s (0:06:03)

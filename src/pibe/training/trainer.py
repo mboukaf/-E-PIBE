@@ -38,6 +38,7 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import torch
 from torch import Tensor
@@ -50,6 +51,7 @@ from pibe.training.callbacks import (
     History,
     IterationRecord,
     load_training_state,
+    save_checkpoint,
     save_training_state,
 )
 from pibe.training.phases import apply_phase, mode_for_iteration
@@ -120,6 +122,45 @@ class PIBETrainer:
             generator=generator,
             device=train_data.x.device,
         )
+
+    # ------------------------------------------------------------------
+    # schedule hooks
+    # ------------------------------------------------------------------
+    #
+    # Algorithm 1 has two phases per cell; Algorithm 2 has three, and splits the
+    # learning rate between the PINN and its EBM.  These five methods are the
+    # only places that differ, so :class:`~pibe.training.epibe_trainer.EPIBETrainer`
+    # overrides them instead of restating the loop.  For PIBE a "phase" is simply
+    # a :class:`~pibe.core.bank.Mode`.
+
+    def phase_for_iteration(self, iteration: int) -> Any:
+        """Which phase iteration ``i`` of a cell's budget belongs to."""
+        return mode_for_iteration(
+            iteration, self.config.n_par, local_only=self.config.local_only
+        )
+
+    def enter_phase(
+        self, cell_index: int, phase: Any
+    ) -> tuple[list[torch.nn.Parameter], list[dict[str, Any]]]:
+        """Set the freeze flags for a phase and return its optimizer groups."""
+        active = apply_phase(self.bank, cell_index, phase)
+        lr = (
+            self.config.lr_local
+            if phase is Mode.LOCAL
+            else self.config.lr_global
+        )
+        return active, [{"params": active, "lr": lr}]
+
+    def phase_mode(self, phase: Any) -> Mode:
+        """The bank-evaluation regime a phase runs under."""
+        return phase
+
+    def phase_label(self, phase: Any) -> str:
+        """Name recorded in the history and in resume checkpoints."""
+        return phase.value
+
+    def after_step(self, phase: Any) -> None:
+        """Hook run after every optimizer step; a no-op for PIBE."""
 
     # ------------------------------------------------------------------
     # outer loop
@@ -208,20 +249,16 @@ class PIBETrainer:
         optimizer: torch.optim.Optimizer | None = None
         scheduler: torch.optim.lr_scheduler.LRScheduler | None = None
         active: list[torch.nn.Parameter] = []
-        current_mode: Mode | None = None
+        current_mode: Any = None
 
         for iteration in range(start_iteration, total_iterations):
-            mode = mode_for_iteration(
-                iteration, config.n_par, local_only=config.local_only
-            )
+            mode = self.phase_for_iteration(iteration)
             if mode is not current_mode:
                 # Phase boundary: reset the freeze flags and build an optimizer
                 # over the newly active parameter block.
-                active = apply_phase(self.bank, cell_index, mode)
+                active, groups = self.enter_phase(cell_index, mode)
                 optimizer = torch.optim.Adam(
-                    active,
-                    lr=config.lr_local if mode is Mode.LOCAL else config.lr_global,
-                    weight_decay=config.weight_decay,
+                    groups, weight_decay=config.weight_decay
                 )
                 scheduler = (
                     torch.optim.lr_scheduler.CosineAnnealingLR(
@@ -232,7 +269,10 @@ class PIBETrainer:
                 )
                 # Resuming mid-phase: restore the optimizer moments and the
                 # schedule position rather than restarting them.
-                if self._resume is not None and self._resume.get("mode") == mode.value:
+                if (
+                    self._resume is not None
+                    and self._resume.get("mode") == self.phase_label(mode)
+                ):
                     if self._resume.get("optimizer") is not None:
                         optimizer.load_state_dict(self._resume["optimizer"])
                     if scheduler is not None and self._resume.get("scheduler") is not None:
@@ -242,7 +282,7 @@ class PIBETrainer:
                 logger.debug(
                     "cell %d entering %s phase with %d trainable tensors",
                     cell_index,
-                    mode.value,
+                    self.phase_label(mode),
                     len(active),
                 )
 
@@ -258,9 +298,21 @@ class PIBETrainer:
             ):
                 save_training_state(
                     self.checkpoint_path, self.bank, optimizer, scheduler,
-                    cell_index=cell_index, iteration=iteration, mode=mode.value,
+                    cell_index=cell_index, iteration=iteration,
+                    mode=self.phase_label(mode),
                     history=self.history, generator=self.generator,
                 )
+                # Also leave weights where every evaluation path looks for
+                # them.  A job killed by its wall clock used to leave only the
+                # resume file, so the run was fully recoverable but looked
+                # unusable to the tooling; writing both costs one file copy per
+                # checkpoint and removes that trap.
+                save_checkpoint(
+                    self.checkpoint_path.parent / "bank.pt", self.bank,
+                    metadata={"cell_index": cell_index, "iteration": iteration,
+                              "mode": self.phase_label(mode), "partial": True},
+                )
+                self.history.save(self.checkpoint_path.parent / "history.json")
 
             if config.log_every > 0 and (
                 iteration % config.log_every == 0 or iteration == total_iterations - 1
@@ -269,7 +321,7 @@ class PIBETrainer:
                     IterationRecord(
                         cell=cell_index,
                         iteration=iteration,
-                        mode=mode.value,
+                        mode=self.phase_label(mode),
                         objective=result.objective,
                         data=float(result.target.data),
                         physics=float(result.target.physics),
@@ -281,7 +333,7 @@ class PIBETrainer:
                     "  cell %d | i=%5d | %-6s | obj=%.4e | data=%.4e | phys=%.4e | |g|=%.2e",
                     cell_index,
                     iteration,
-                    mode.value,
+                    self.phase_label(mode),
                     result.objective,
                     float(result.target.data),
                     float(result.target.physics),
@@ -317,13 +369,14 @@ class PIBETrainer:
     def step(
         self,
         cell_index: int,
-        mode: Mode,
+        phase: Any,
         optimizer: torch.optim.Optimizer,
         active: list[torch.nn.Parameter],
     ) -> StepResult:
         """One optimizer step (lines 4-15)."""
         index = self.batcher.sample()
         y = self.train_data.y[index]
+        mode = self.phase_mode(phase)
 
         outputs = self.bank(
             target_cell=cell_index,
@@ -365,6 +418,7 @@ class PIBETrainer:
                 )
             )
         optimizer.step()
+        self.after_step(phase)
 
         # Detach before reporting: the recorded scalars must not keep the
         # step's graph alive past the optimizer update.

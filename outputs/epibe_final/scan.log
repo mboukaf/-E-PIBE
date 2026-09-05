@@ -1,0 +1,8 @@
+01:21:47 | INFO    | location_scan      | scanning offsets [0.075] against a true sensor bias of +0.0500
+01:21:47 | INFO    | location_scan      | offset c = +0.0750
+01:21:55 | INFO    | location_scan      |     density seeded at mu = +0.07487 (residuals were -0.00000)
+01:21:55 | INFO    | location_scan      |     step     0 | L_Tot,E = +2.315000e+00
+01:27:02 | INFO    | location_scan      |     step  6000 | L_Tot,E = -1.747291e+00
+01:31:29 | INFO    | location_scan      |     step 12000 | L_Tot,E = -2.185076e+00
+01:35:57 | INFO    | location_scan      |     step 18000 | L_Tot,E = -2.585463e+00
+01:40:25 | INFO    | location_scan      |     L_Tot,E = -2.713333e+00 | mu_hat = +0.02745 | x1-truth = +0.02184

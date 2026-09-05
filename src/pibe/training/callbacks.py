@@ -10,6 +10,10 @@ from typing import Any
 import torch
 from torch import nn
 
+from pibe.utils.logging import get_logger
+
+logger = get_logger(__name__)
+
 
 @dataclass
 class IterationRecord:
@@ -76,9 +80,45 @@ def save_checkpoint(
     )
 
 
+def resolve_checkpoint(path: Path | str) -> Path:
+    """The best available weights for a run: the final file, else the resume file.
+
+    ``bank.pt`` is written when a run finishes; ``state.pt`` is written every
+    ``checkpoint_every`` iterations and deleted on success.  A run cut short by
+    a wall clock therefore has only the latter --- which nonetheless contains a
+    complete ``state_dict``, so every evaluation path should accept it rather
+    than reporting the run as unusable.  Accepts a run directory or a file path.
+    """
+    path = Path(path)
+    if path.is_dir():
+        for name in ("bank.pt", "state.pt"):
+            if (path / name).exists():
+                return path / name
+        raise FileNotFoundError(f"no bank.pt or state.pt in {path}")
+    if not path.exists():
+        fallback = path.parent / "state.pt"
+        if fallback.exists():
+            logger.warning(
+                "%s not found; falling back to %s, the resume checkpoint of an "
+                "unfinished run. Its weights are usable, but cells after the one "
+                "training stopped in are still at initialization.",
+                path, fallback,
+            )
+            return fallback
+    return path
+
+
 def load_checkpoint(path: Path | str, bank: nn.Module) -> dict[str, Any]:
-    """Restore a bank's parameters in place; returns the stored metadata."""
-    payload = torch.load(path, map_location="cpu", weights_only=False)
+    """Restore a bank's parameters in place; returns the stored metadata.
+
+    Accepts ``bank.pt``, ``state.pt`` or a run directory --- see
+    :func:`resolve_checkpoint`.  Both file formats store the weights under
+    ``state_dict``, so an interrupted run can be evaluated without waiting for
+    it to finish.
+    """
+    payload = torch.load(
+        resolve_checkpoint(path), map_location="cpu", weights_only=False
+    )
     bank.load_state_dict(payload["state_dict"])
     return payload.get("metadata", {})
 

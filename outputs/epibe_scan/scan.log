@@ -1,0 +1,57 @@
+00:12:23 | INFO    | location_scan      | scanning offsets [-0.05, -0.025, 0.0, 0.025, 0.05, 0.075, 0.1, 0.15] against a true sensor bias of +0.0500
+00:12:23 | INFO    | location_scan      | offset c = -0.0500
+00:12:40 | INFO    | location_scan      |     density seeded at mu = -0.04997 (residuals were -0.00000)
+00:12:40 | INFO    | location_scan      |     step     0 | L_Tot,E = +2.383152e+00
+00:14:53 | INFO    | location_scan      |     step  1500 | L_Tot,E = -1.945027e+00
+00:17:05 | INFO    | location_scan      |     step  3000 | L_Tot,E = -1.911080e+00
+00:19:18 | INFO    | location_scan      |     step  4500 | L_Tot,E = -2.497947e+00
+00:21:32 | INFO    | location_scan      |     L_Tot,E = -2.683139e+00 | mu_hat = -0.04609 | x1-truth = +0.09601
+00:21:32 | INFO    | location_scan      | offset c = -0.0250
+00:21:48 | INFO    | location_scan      |     density seeded at mu = -0.02500 (residuals were -0.00000)
+00:21:48 | INFO    | location_scan      |     step     0 | L_Tot,E = +2.092182e+00
+00:24:05 | INFO    | location_scan      |     step  1500 | L_Tot,E = -1.808166e+00
+00:26:22 | INFO    | location_scan      |     step  3000 | L_Tot,E = -1.091681e+00
+00:28:34 | INFO    | location_scan      |     step  4500 | L_Tot,E = -2.532858e+00
+00:30:43 | INFO    | location_scan      |     L_Tot,E = -2.667121e+00 | mu_hat = -0.02720 | x1-truth = +0.07708
+00:30:43 | INFO    | location_scan      | offset c = +0.0000
+00:30:58 | INFO    | location_scan      |     density seeded at mu = -0.00000 (residuals were -0.00000)
+00:30:58 | INFO    | location_scan      |     step     0 | L_Tot,E = -2.766730e+00
+00:33:07 | INFO    | location_scan      |     step  1500 | L_Tot,E = -1.702691e+00
+00:35:16 | INFO    | location_scan      |     step  3000 | L_Tot,E = -1.649021e+00
+00:37:24 | INFO    | location_scan      |     step  4500 | L_Tot,E = -2.531159e+00
+00:39:36 | INFO    | location_scan      |     L_Tot,E = -2.683658e+00 | mu_hat = -0.00335 | x1-truth = +0.05291
+00:39:36 | INFO    | location_scan      | offset c = +0.0250
+00:39:52 | INFO    | location_scan      |     density seeded at mu = +0.02499 (residuals were -0.00000)
+00:39:52 | INFO    | location_scan      |     step     0 | L_Tot,E = +1.715006e+00
+00:42:02 | INFO    | location_scan      |     step  1500 | L_Tot,E = -1.591129e+00
+00:44:11 | INFO    | location_scan      |     step  3000 | L_Tot,E = -2.302902e+00
+00:46:19 | INFO    | location_scan      |     step  4500 | L_Tot,E = -2.501793e+00
+00:48:27 | INFO    | location_scan      |     L_Tot,E = -2.677889e+00 | mu_hat = +0.01726 | x1-truth = +0.03219
+00:48:27 | INFO    | location_scan      | offset c = +0.0500
+00:48:43 | INFO    | location_scan      |     density seeded at mu = +0.04994 (residuals were -0.00000)
+00:48:43 | INFO    | location_scan      |     step     0 | L_Tot,E = +2.219833e+00
+00:51:01 | INFO    | location_scan      |     step  1500 | L_Tot,E = -1.388242e+00
+00:53:23 | INFO    | location_scan      |     step  3000 | L_Tot,E = -2.082715e+00
+00:55:31 | INFO    | location_scan      |     step  4500 | L_Tot,E = -2.512249e+00
+00:57:35 | INFO    | location_scan      |     L_Tot,E = -2.659612e+00 | mu_hat = +0.02580 | x1-truth = +0.02317
+00:57:35 | INFO    | location_scan      | offset c = +0.0750
+00:57:50 | INFO    | location_scan      |     density seeded at mu = +0.07487 (residuals were -0.00000)
+00:57:50 | INFO    | location_scan      |     step     0 | L_Tot,E = +2.315000e+00
+00:59:44 | INFO    | location_scan      |     step  1500 | L_Tot,E = -7.382743e-01
+01:01:16 | INFO    | location_scan      |     step  3000 | L_Tot,E = -2.345995e+00
+01:02:47 | INFO    | location_scan      |     step  4500 | L_Tot,E = -2.595147e+00
+01:04:46 | INFO    | location_scan      |     L_Tot,E = -2.689291e+00 | mu_hat = +0.05829 | x1-truth = -0.00908
+01:04:47 | INFO    | location_scan      | offset c = +0.1000
+01:05:01 | INFO    | location_scan      |     density seeded at mu = +0.09983 (residuals were -0.00000)
+01:05:01 | INFO    | location_scan      |     step     0 | L_Tot,E = +2.350677e+00
+01:06:37 | INFO    | location_scan      |     step  1500 | L_Tot,E = -1.517060e+00
+01:08:08 | INFO    | location_scan      |     step  3000 | L_Tot,E = -2.305555e+00
+01:09:38 | INFO    | location_scan      |     step  4500 | L_Tot,E = -2.447006e+00
+01:11:10 | INFO    | location_scan      |     L_Tot,E = -2.620800e+00 | mu_hat = +0.03281 | x1-truth = +0.01477
+01:11:10 | INFO    | location_scan      | offset c = +0.1500
+01:11:21 | INFO    | location_scan      |     density seeded at mu = +0.14605 (residuals were -0.00000)
+01:11:21 | INFO    | location_scan      |     step     0 | L_Tot,E = +1.211645e-01
+01:12:52 | INFO    | location_scan      |     step  1500 | L_Tot,E = -2.669598e-01
+01:14:23 | INFO    | location_scan      |     step  3000 | L_Tot,E = -1.625970e+00
+01:15:54 | INFO    | location_scan      |     step  4500 | L_Tot,E = -2.431733e+00
+01:17:25 | INFO    | location_scan      |     L_Tot,E = -2.554889e+00 | mu_hat = +0.01523 | x1-truth = +0.03322

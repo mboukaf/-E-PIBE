@@ -184,6 +184,9 @@ class DataConfig:
     noise_sigma: float = 0.0
     noise_bound: float | None = None
     noise_truncation_sigmas: float = 3.0
+    noise_family: str = "gaussian"
+    noise_bias: float = 0.0
+    noise_bias_relative: bool = True
     train_fraction: float = 0.8
     sample_disturbance_per_trajectory: bool = True
     sample_theta_per_trajectory: bool = False
@@ -318,6 +321,117 @@ class TrainingConfig:
 
 
 @dataclass
+class EBMConfig:
+    r"""Energy-based residual models for EPIBE, Section 3.2.
+
+    Left disabled by default, so every existing PIBE configuration and every
+    saved ``config.resolved.yaml`` keeps its exact meaning: absent from a file,
+    these fields take the values below and the run is plain PIBE.
+
+    Attributes
+    ----------
+    enabled
+        Whether to train EPIBE (Algorithm 2) rather than PIBE (Algorithm 1).
+    beta
+        Inverse temperature :math:`\beta > 0` in the density (49).
+    hidden, activation
+        Architecture of each scalar energy :math:`E_{\zeta_k}`.
+    energy_scale
+        The multiplier that fixes Assumption 3's constants: with spectral
+        normalization, :math:`B_{E,k}` and :math:`L_{E,k} = A/\bar\rho_k`.
+        Larger values let the learned density be sharper relative to its
+        support; see :mod:`pibe.ebm.energy` for the trade-off.
+    energy_bound
+        :math:`B_{E,k}`; defaults to ``energy_scale``.
+    spectral_norm
+        Spectral normalization of the energy MLP's layers, which turns the
+        Lipschitz clause of (48) from an observation into a guarantee.
+    weight_bound
+        Box for the projected EBM updates of Algorithm 2 lines 17 and 23,
+        making :math:`\mathcal{K}_k` compact.  ``None`` disables the projection.
+    panels, nodes_per_panel
+        The fixed Gauss--Legendre rule of Remark 4; their product is the node
+        count, which Remark 4 puts at :math:`10^2`--:math:`10^3`.
+    barrier_scale
+        Width, relative to the radius, of the barrier continuing the energy
+        outside :math:`\\mathcal{R}_k`; see
+        :meth:`~pibe.ebm.density.ScalarEBM.energy_with_barrier`.
+    radius
+        Override for the residual support :math:`\bar\rho_k` --- one value for
+        every cell, or one per cell in index order ``2..n+1``.  ``None`` uses
+        Assumption 3's a priori bound, which is guaranteed but can be orders of
+        magnitude wider than the realized residuals; see :mod:`pibe.ebm.support`.
+    cells
+        Which cells use the energy-based data term.  ``None`` means all of
+        them, which is Section 3.2 Step 2 as written.  ``[2]`` restricts it to
+        the measurement cell and keeps PIBE's quadratic consistency terms
+        downstream --- see :class:`~pibe.core.energy_bank.EnergyEstimatorBank`
+        for why that distinction matters.
+    centered_warmup
+        Whether the warm-up penalizes the residual's *variance* instead of its
+        magnitude.  Remark 5's warm-up runs "the corresponding PIBE local
+        objective", which is the quadratic term --- and the quadratic term is
+        the zero-mean assumption, so EPIBE would start from exactly the answer
+        it exists to improve on.  See
+        :meth:`~pibe.core.energy_bank.EnergyEstimatorBank.cell_loss`.
+    n_ebm
+        :math:`N_{EBM}`, the per-cell EBM activation iteration.  Remark 5
+        requires :math:`0 < N_{EBM} < N_{par} < N_{tot}` and advises choosing it
+        "so that the warm-up data and physics losses have stabilized before
+        activating the EBM".
+    n_fit
+        Optional EBM-only iterations inserted right after activation, before
+        the joint updates begin.  ``0`` reproduces Algorithm 2 exactly; a
+        positive value lets the density converge on frozen residuals first, so
+        the PINN never sees the O(1) boundary force a cold, near-uniform density
+        exerts.  See :func:`~pibe.training.epibe_phases.phase_for_iteration`.
+    lr_ebm
+        Learning rate for the EBM parameters; defaults to ``lr_local``.  Kept
+        separate because the energy and the PINN are fitted to each other and
+        tolerate very different step sizes.
+    """
+
+    enabled: bool = False
+    beta: float = 1.0
+    hidden: tuple[int, ...] = (64, 64)
+    activation: str = "tanh"
+    energy_scale: float = 1.0
+    energy_bound: float = 12.0
+    spectral_norm: bool = False
+    weight_bound: float | None = 10.0
+    panels: int = 64
+    nodes_per_panel: int = 16
+    barrier_scale: float = 0.1
+    radius: float | list[float] | None = None
+    cells: list[int] | None = None
+    centered_warmup: bool = False
+    n_ebm: int = 1000
+    n_fit: int = 0
+    lr_ebm: float | None = None
+
+    def __post_init__(self) -> None:
+        # YAML gives lists; the dataclass stores hashable tuples, as
+        # ArchitectureConfig does, so a round trip is an identity.
+        self.hidden = tuple(self.hidden)
+
+    def validate(self, n_par: int, n_total: int) -> None:
+        """Check Remark 5's ordering :math:`0 < N_{EBM} < N_{par} < N_{tot}`."""
+        if not self.enabled:
+            return
+        if self.beta <= 0:
+            raise ValueError(f"beta must be positive, got {self.beta}")
+        if self.panels * self.nodes_per_panel < 2:
+            raise ValueError("the quadrature needs at least two nodes")
+        if self.n_fit < 0:
+            raise ValueError(f"n_fit must be non-negative, got {self.n_fit}")
+        if not 0 < self.n_ebm < n_par:
+            raise ValueError(
+                f"Remark 5 requires 0 < n_ebm < n_par < n_total, got "
+                f"n_ebm={self.n_ebm}, n_par={n_par}, n_total={n_total}"
+            )
+
+
+@dataclass
 class SystemConfig:
     """Names the registered system and its constructor arguments."""
 
@@ -334,6 +448,7 @@ class RunConfig:
     basis: BasisConfig = field(default_factory=BasisConfig)
     architecture: ArchitectureConfig = field(default_factory=ArchitectureConfig)
     training: TrainingConfig = field(default_factory=TrainingConfig)
+    ebm: EBMConfig = field(default_factory=EBMConfig)
     device: str = "auto"
     dtype: str = "float64"
     seed: int = 0
@@ -398,6 +513,7 @@ _NESTED = {
     "BasisConfig": BasisConfig,
     "ArchitectureConfig": ArchitectureConfig,
     "TrainingConfig": TrainingConfig,
+    "EBMConfig": EBMConfig,
 }
 
 

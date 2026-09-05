@@ -1,0 +1,97 @@
+# PIBE control for configs/automatica_n3v2_epibe.yaml.
+#
+# Byte-for-byte identical to the EPIBE config -- same system, architecture,
+# schedule, seeds and the same biased sensor -- except that the ebm block is
+# disabled.  Any difference in the results is therefore attributable to the
+# data term alone, which is the only thing Section 3.2 changes.
+
+system:
+  name: automatica_n3v2
+  kwargs:
+    theta_seed: 0
+
+data:
+  n_trajectories: 64
+  n_samples: 201
+  horizon: 20.0
+  substeps: 8
+  noise_sigma: 0.002
+  noise_truncation_sigmas: 3.0
+  noise_family: gaussian
+  noise_bias: 0.05
+  noise_bias_relative: false   # absolute offset, not a multiple of sigma
+  train_fraction: 0.8
+  sample_disturbance_per_trajectory: false
+  sample_theta_per_trajectory: false
+  seed: 1
+
+basis:
+  kind: fourier
+  q: 3
+  omega: 1.2566370614359172
+  coeff_lo: [-0.18, -0.18, -0.12]
+  coeff_hi: [0.18, 0.18, 0.12]
+  remainder_amplitude: 0.0
+
+architecture:
+  latent_dim: 32
+  encoder_hidden: [128, 128]
+  decoder_hidden: [64, 64, 64]
+  head_hidden: [64, 64]
+  activation: tanh
+  time_fourier_features: 10
+  time_feature_scaling: true
+
+training:
+  n_total: 6000
+  n_par: 3000
+  lam: 1.0
+  n_collocation: 401
+  batch_size: 16
+  lr_local: 0.001
+  lr_global: 0.0005
+  grad_clip: 1.0
+  log_every: 500
+  seed: 0
+  lr_schedule: cosine
+  final_global_iters: 30000
+  checkpoint_every: 2000
+
+ebm:
+  enabled: false
+  beta: 1.0
+  hidden: [64, 64]
+  # B_E = 12 gives the density a dynamic range of e^24, against the e^5.1 this
+  # problem needs (support 1.0 wide, residual law ~0.006 wide).  Spectral
+  # normalization is left off: pinned at 1 it caps the Lipschitz constant at
+  # 24/unit, which cannot resolve a feature of width 0.006, and the density
+  # saturates at the constraint instead of fitting.  The weight box below is
+  # what makes K_k compact, which is all Assumption 3 asks.
+  energy_bound: 12.0
+  spectral_norm: false
+  weight_bound: 10.0
+  panels: 64
+  nodes_per_panel: 16
+  # Assumption 3's a priori radius here is (2.5 - -2.5) + 0.056 = 5.06, while
+  # the realized first-cell residual is of order 0.06.  A density on 1% of its
+  # support is representable but wastes the whole quadrature and most of the
+  # energy budget, so the support is narrowed by hand to a value that still
+  # comfortably contains every admissible residual -- out_of_support_fraction
+  # is monitored throughout training and must stay at zero.
+  # Tight enough that the drift the EBM-only stretch does not catch is small,
+  # wide enough to contain bias + noise + warm-up reconstruction slack with
+  # room to spare.  out_of_support_fraction must stay at zero.
+  radius: 0.15
+  n_ebm: 1000
+  # Algorithm 2 as written (n_fit = 0) is unstable on this problem: a cold,
+  # near-uniform density exerts an O(1) force on the state estimate that no
+  # single cell's physics term opposes, and the residual slides to the edge of
+  # its support.  Letting the density converge on frozen residuals first
+  # removes that transient.  See pibe.training.epibe_phases.
+  n_fit: 800
+  lr_ebm: 0.002
+
+device: auto
+dtype: float64
+seed: 0
+output_dir: outputs/n3v2_biased_pibe

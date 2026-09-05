@@ -25,7 +25,7 @@ import torch  # noqa: E402
 from pibe.config import RunConfig  # noqa: E402
 from pibe.eval.metrics import compute_metrics  # noqa: E402
 from pibe.experiment import build_experiment  # noqa: E402
-from pibe.training.callbacks import load_checkpoint  # noqa: E402
+from pibe.training.callbacks import load_checkpoint, resolve_checkpoint  # noqa: E402
 from pibe.utils.logging import get_logger, setup_logging  # noqa: E402
 
 logger = get_logger("evaluate")
@@ -46,16 +46,26 @@ def main() -> int:
 
     setup_logging(args.log_level)
 
-    payload = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
+    # Accepts bank.pt, state.pt or a run directory: a job stopped by its wall
+    # clock leaves only the resume file, and its weights are perfectly usable.
+    checkpoint = resolve_checkpoint(args.checkpoint)
+    payload = torch.load(checkpoint, map_location="cpu", weights_only=False)
     if args.config is not None:
         config = RunConfig.from_yaml(args.config)
     else:
         stored = payload.get("metadata", {}).get("config")
         if stored is None:
-            raise SystemExit(
-                "checkpoint carries no config; pass --config explicitly"
-            )
-        config = RunConfig.from_dict(stored)
+            # The resume file carries no config, but the run directory does:
+            # train_pibe.py writes it before the first iteration.
+            beside = checkpoint.parent / "config.resolved.yaml"
+            if not beside.exists():
+                raise SystemExit(
+                    "checkpoint carries no config and no config.resolved.yaml "
+                    "sits beside it; pass --config explicitly"
+                )
+            config = RunConfig.from_yaml(beside)
+        else:
+            config = RunConfig.from_dict(stored)
 
     experiment = build_experiment(config)
     load_checkpoint(args.checkpoint, experiment.bank)

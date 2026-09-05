@@ -166,15 +166,54 @@ def main() -> int:
 
     # Score the exact solution on the same objective, so a poor result is
     # attributed to optimization or to the loss rather than left ambiguous.
-    comparison = compare_to_oracle(
-        bank=experiment.bank,
-        disturbance=experiment.disturbance,
-        data=experiment.train_data,
-        t_coll=experiment.t_coll,
-        lam=config.training.lam,
-        noise_floor=getattr(experiment.noise, "variance", None),
+    # The oracle scores the exact solution with the quadratic data term.  An
+    # EPIBE bank's own data term is a likelihood under a density it also
+    # learned, so the two sides would not be on the same objective; score the
+    # trained bank quadratically too, and say so.
+    was_energy = getattr(experiment.bank, "use_energy", False)
+    if was_energy:
+        experiment.bank.use_energy = False
+    try:
+        comparison = compare_to_oracle(
+            bank=experiment.bank,
+            disturbance=experiment.disturbance,
+            data=experiment.train_data,
+            t_coll=experiment.t_coll,
+            lam=config.training.lam,
+            noise_floor=getattr(experiment.noise, "variance", None),
+        )
+    finally:
+        if was_energy:
+            experiment.bank.use_energy = True
+    logger.info(
+        "oracle comparison (train%s):\n%s",
+        ", scored on the quadratic objective" if was_energy else "",
+        comparison.summary(),
     )
-    logger.info("oracle comparison (train):\n%s", comparison.summary())
+
+    # Eq. (54) and the per-cell residual densities, for an EPIBE run.
+    if hasattr(experiment.bank, "density_moments"):
+        densities = {
+            str(k): {
+                "mean": m.mean,
+                "std": m.std,
+                "log_partition": m.log_partition,
+                "normalization_error": experiment.bank.ebm(k).normalization_error(),
+                "radius": experiment.bank.radii[k],
+            }
+            for k, m in experiment.bank.density_moments().items()
+        }
+        densities["mu_omega_hat"] = experiment.bank.noise_mean()
+        densities["true_noise_bias"] = getattr(experiment.noise, "bias", 0.0)
+        with open(output_dir / "densities.json", "w") as handle:
+            json.dump(densities, handle, indent=2)
+        logger.info(
+            "learned residual densities:\n%s\n  mu_omega_hat = %+.6e "
+            "(Eq. 54)   true sensor bias = %+.6e",
+            experiment.bank.support_report(),
+            experiment.bank.noise_mean(),
+            getattr(experiment.noise, "bias", 0.0),
+        )
 
     # Figures last, and never fatal: a missing matplotlib or a display quirk
     # must not discard a multi-hour training run that has already succeeded.

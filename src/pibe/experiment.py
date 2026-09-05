@@ -16,16 +16,23 @@ from torch import Tensor
 from pibe.basis import DisturbanceBasis, build_basis
 from pibe.config import RunConfig
 from pibe.core.bank import EstimatorBank
+from pibe.core.energy_bank import EnergyEstimatorBank
 from pibe.data.dataset import TrajectoryData, generate_dataset
 from pibe.data.disturbance import (
     BasisDisturbance,
     ChirpRemainder,
     sample_coefficients,
 )
-from pibe.data.noise import NoiseFree, NoiseModel, TruncatedGaussianNoise
+from pibe.data.noise import (
+    NoiseFree,
+    NoiseModel,
+    TruncatedGaussianNoise,
+    build_noise_model,
+)
 from pibe.data.simulate import fill_distance, uniform_grid
 from pibe.systems.base import TriangularSystem
 from pibe.systems.registry import build_system
+from pibe.training.epibe_trainer import EPIBETrainer
 from pibe.training.trainer import PIBETrainer
 from pibe.utils.device import check_dtype_support, resolve_device, resolve_dtype
 from pibe.utils.logging import get_logger
@@ -53,15 +60,22 @@ class Experiment:
     dtype: torch.dtype
 
     def make_trainer(self) -> PIBETrainer:
-        """A trainer over this experiment's data and schedule."""
-        return PIBETrainer(
-            bank=self.bank,
+        """A trainer over this experiment's data and schedule.
+
+        Returns an :class:`~pibe.training.epibe_trainer.EPIBETrainer`
+        (Algorithm 2) when the bank carries energy models, and the plain
+        Algorithm 1 trainer otherwise.
+        """
+        common = dict(
             train_data=self.train_data,
             t_coll=self.t_coll,
             config=self.config.training,
             val_data=self.val_data,
             generator=make_generator(self.config.training.seed),
         )
+        if isinstance(self.bank, EnergyEstimatorBank):
+            return EPIBETrainer(self.bank, ebm_config=self.config.ebm, **common)
+        return PIBETrainer(bank=self.bank, **common)
 
     def describe(self) -> str:
         """A short report of the constructed problem."""
@@ -88,18 +102,42 @@ class Experiment:
                 f"bank              : cells 2..{self.bank.final_index}, "
                 f"{n_params} parameters",
             ]
+            + (
+                [
+                    f"estimator         : EPIBE (Algorithm 2), "
+                    f"N_EBM={self.config.ebm.n_ebm}, beta={self.config.ebm.beta:g}",
+                    "residual supports (Assumption 3):",
+                    self.bank.support_report(),
+                ]
+                if isinstance(self.bank, EnergyEstimatorBank)
+                else ["estimator         : PIBE (Algorithm 1)"]
+            )
         )
 
 
 def build_noise(config: RunConfig) -> NoiseModel:
-    """Construct the measurement-noise law described by the config."""
+    """Construct the measurement-noise law described by the config.
+
+    The truncated-Gaussian path is kept exactly as it was --- it is the only one
+    that honours ``noise_bound``, and every existing run resolves to it --- so
+    the non-Gaussian families and the sensor bias are strictly additive.  A
+    nonzero ``noise_bias`` is the case PIBE cannot represent and EPIBE exists
+    for; see :mod:`pibe.data.noise`.
+    """
     data = config.data
-    if data.noise_sigma <= 0:
+    if data.noise_sigma <= 0 and not data.noise_bias:
         return NoiseFree()
-    return TruncatedGaussianNoise(
-        sigma=data.noise_sigma,
-        bound=data.noise_bound,
-        truncation_sigmas=data.noise_truncation_sigmas,
+    if data.noise_family == "gaussian" and not data.noise_bias:
+        return TruncatedGaussianNoise(
+            sigma=data.noise_sigma,
+            bound=data.noise_bound,
+            truncation_sigmas=data.noise_truncation_sigmas,
+        )
+    return build_noise_model(
+        data.noise_family,
+        data.noise_sigma,
+        bias=data.noise_bias,
+        bias_relative=data.noise_bias_relative,
     )
 
 
@@ -178,13 +216,29 @@ def build_experiment(config: RunConfig) -> Experiment:
     t_coll = uniform_grid(0.0, horizon, config.training.n_collocation, dtype=dtype)
 
     # --- bank ---------------------------------------------------------
-    bank = EstimatorBank(
-        system=system,
-        basis=basis,
-        n_samples=config.data.n_samples,
-        coefficient_bounds=coefficient_bounds,
-        architecture=config.architecture,
-    )
+    # EPIBE (Section 3.2) differs only in the data term, so it is the same bank
+    # with one scalar EBM bolted onto each cell; everything downstream --- the
+    # estimates, the metrics, the figures --- is untouched by the choice.
+    if config.ebm.enabled:
+        config.ebm.validate(config.training.n_par, config.training.n_total)
+        bank = EnergyEstimatorBank(
+            system=system,
+            basis=basis,
+            n_samples=config.data.n_samples,
+            coefficient_bounds=coefficient_bounds,
+            architecture=config.architecture,
+            ebm=config.ebm,
+            noise_bound=noise.bound,
+            dtype=dtype,
+        )
+    else:
+        bank = EstimatorBank(
+            system=system,
+            basis=basis,
+            n_samples=config.data.n_samples,
+            coefficient_bounds=coefficient_bounds,
+            architecture=config.architecture,
+        )
 
     # --- placement ----------------------------------------------------
     system.to(device=device, dtype=dtype)
