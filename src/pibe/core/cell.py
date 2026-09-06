@@ -188,12 +188,14 @@ class EstimatorCell(nn.Module):
             activation=architecture.activation,
             time_fourier_features=architecture.time_fourier_features,
             time_feature_scaling=architecture.time_feature_scaling,
+            saturation_limit=architecture.saturation_limit,
         )
         self.head = ParameterHead(
             latent_dim=architecture.latent_dim,
             output_bounds=head_bounds,
             hidden=architecture.head_hidden,
             activation=architecture.activation,
+            saturation_limit=architecture.saturation_limit,
         )
 
     @property

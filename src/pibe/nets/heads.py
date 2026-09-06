@@ -49,6 +49,7 @@ class ParameterHead(nn.Module):
         output_bounds: Tensor,
         hidden: Sequence[int] = (64, 64),
         activation: str = "tanh",
+        saturation_limit: float | None = None,
     ) -> None:
         super().__init__()
         output_bounds = torch.as_tensor(output_bounds)
@@ -65,7 +66,9 @@ class ParameterHead(nn.Module):
             hidden=hidden,
             activation=activation,
         )
-        self.output_map = make_output_map(output_bounds, self.out_dim)
+        self.output_map = make_output_map(
+            output_bounds, self.out_dim, saturation_limit=saturation_limit
+        )
 
     def forward(self, z: Tensor) -> Tensor:
         """Map latent codes ``(B, r_k)`` to constrained outputs ``(B, out_dim)``."""

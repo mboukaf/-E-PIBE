@@ -329,6 +329,19 @@ class PIBETrainer:
                         grad_norm=result.grad_norm,
                     )
                 )
+                # A vanishing gradient here is almost always a saturated box
+                # reparameterization, which is unrecoverable without a floor.
+                # Say so at the moment it happens rather than leaving it to be
+                # reconstructed from a wrecked checkpoint a day later.
+                if result.grad_norm < 1e-5:
+                    pinned = self.bank.saturation().get(cell_index, 0.0)
+                    logger.warning(
+                        "  cell %d | i=%5d | gradient norm %.2e with %.0f%% of the "
+                        "cell's outputs pinned against their admissible box. "
+                        "tanh saturates and the gradient will not recover; set "
+                        "architecture.saturation_limit (e.g. 4.0) to floor it.",
+                        cell_index, iteration, result.grad_norm, 100 * pinned,
+                    )
                 logger.info(
                     "  cell %d | i=%5d | %-6s | obj=%.4e | data=%.4e | phys=%.4e | |g|=%.2e",
                     cell_index,

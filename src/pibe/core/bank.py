@@ -395,6 +395,36 @@ class EstimatorBank(nn.Module):
             x_aux=outputs[self.final_index].x_prev_data,
         )
 
+    @torch.no_grad()
+    def saturation(self, outputs: dict[int, CellOutput] | None = None) -> dict[int, float]:
+        r"""Per-cell fraction of box outputs pinned against their admissible set.
+
+        A head or decoder driven to :math:`|z| \gg 1` returns
+        :math:`c \pm r\tanh(z)` with a gradient multiplier of
+        :math:`4e^{-2|z|}`; past :math:`|z| \approx 18` that is below float64
+        resolution and the unit is dead for the rest of the run.  This is cheap
+        enough to report every logging interval, which turns a silent, permanent
+        failure into a visible one.
+
+        Measured on the *parameters* rather than the activations, so it needs no
+        forward pass: a head whose last layer has grown large produces large
+        ``z`` for every input.
+        """
+        report: dict[int, float] = {}
+        for k in self.cell_indices:
+            pinned, total = 0, 0
+            for module in (self.cell(k).decoder, self.cell(k).head):
+                mapping = getattr(module, "output_map", None)
+                if mapping is None or not hasattr(mapping, "radius"):
+                    continue
+                # The last linear layer's row norms bound |z| for bounded inputs.
+                last = [m for m in module.net.net if isinstance(m, nn.Linear)][-1]
+                scale = last.weight.abs().sum(dim=1) + last.bias.abs()
+                pinned += int((scale > 6.0).sum())
+                total += scale.numel()
+            report[k] = pinned / max(1, total)
+        return report
+
     def extra_repr(self) -> str:  # pragma: no cover - trivial
         return (
             f"n={self.state_dim}, cells=2..{self.final_index}, "

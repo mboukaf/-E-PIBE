@@ -76,7 +76,9 @@ class FourierTimeFeatures(nn.Module):
         Apply the :math:`1/k` amplitude scaling described above.
     """
 
-    def __init__(self, n_features: int, scale_by_harmonic: bool = True) -> None:
+    def __init__(self, n_features: int, scale_by_harmonic: bool = True,
+        saturation_limit: float | None = None,
+    ) -> None:
         super().__init__()
         if n_features < 0:
             raise ValueError(f"n_features must be non-negative, got {n_features}")
@@ -141,6 +143,7 @@ class StateDecoder(nn.Module):
         activation: str = "tanh",
         time_fourier_features: int = 0,
         time_feature_scaling: bool = True,
+        saturation_limit: float | None = None,
     ) -> None:
         super().__init__()
         output_bounds = torch.as_tensor(output_bounds)
@@ -162,7 +165,9 @@ class StateDecoder(nn.Module):
             hidden=hidden,
             activation=activation,
         )
-        self.output_map = make_output_map(output_bounds, self.out_dim)
+        self.output_map = make_output_map(
+            output_bounds, self.out_dim, saturation_limit=saturation_limit
+        )
 
     def forward(self, t: Tensor, z: Tensor) -> Tensor:
         """Evaluate the decoder on a shared time grid.

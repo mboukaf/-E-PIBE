@@ -46,6 +46,7 @@ class ArchitectureConfig:
     activation: str = "tanh"
     time_fourier_features: int = 0
     time_feature_scaling: bool = True
+    saturation_limit: float | None = None
 
     def __post_init__(self) -> None:
         if self.time_fourier_features < 0:
