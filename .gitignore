@@ -1,0 +1,4 @@
+
+# Virtualenvs are platform-specific: copying one between machines
+# replaces a working interpreter with a foreign binary.
+.venv/
