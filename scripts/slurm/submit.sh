@@ -17,17 +17,19 @@ ARRAY="${1:-0-5}"
 
 mkdir -p logs outputs
 
-for cfg in configs/automatica_n3v2_big_v2.yaml \
-           configs/automatica_n3v2_big_lowomega_v2.yaml; do
+VERSION="${PIBE_VERSION:-v3}"
+for cfg in "configs/automatica_n3v2_big_${VERSION}.yaml" \
+           "configs/automatica_n3v2_big_lowomega_${VERSION}.yaml"; do
     [ -f "$cfg" ] || { echo "missing config: $cfg" >&2; exit 1; }
 done
 
 # Resuming an old run by accident is the other silent failure mode: the v1
 # attempt left state.pt files behind, and train_pibe.py continues from them.
-for d in outputs/big_w5_v2_s* outputs/big_w10_v2_s*; do
+for d in outputs/big_w5_${VERSION}_s* outputs/big_w10_${VERSION}_s*; do
     [ -e "$d/state.pt" ] || continue
     echo "NOTE: $d/state.pt exists -- that task will RESUME, not restart."
 done
 
-echo "submitting array ${ARRAY}"
-sbatch --array="${ARRAY}" scripts/slurm/train_pibe.sbatch
+echo "submitting array ${ARRAY} at version ${VERSION}"
+PIBE_VERSION="${VERSION}" sbatch --export=ALL,PIBE_VERSION="${VERSION}" \
+    --array="${ARRAY}" scripts/slurm/train_pibe.sbatch

@@ -80,16 +80,23 @@ set -euo pipefail
 
 IDX="${SLURM_ARRAY_TASK_ID:-0}"
 SEED=$(( IDX / 2 ))
+# Which generation of the configs to run.  Override at submission:
+#   PIBE_VERSION=v2 sbatch --array=0-5 scripts/slurm/train_pibe.sbatch
+#   v2: theta fixed across trajectories; x0 and the disturbance vary.
+#   v3: theta, x0 and the disturbance all vary per trajectory (default).
+VERSION="${PIBE_VERSION:-v3}"
+
 if (( IDX % 2 == 0 )); then
-    CONFIG="configs/automatica_n3v2_big_v2.yaml";          TAG="w5"
+    CONFIG="configs/automatica_n3v2_big_${VERSION}.yaml";          TAG="w5"
 else
-    CONFIG="configs/automatica_n3v2_big_lowomega_v2.yaml"; TAG="w10"
+    CONFIG="configs/automatica_n3v2_big_lowomega_${VERSION}.yaml"; TAG="w10"
 fi
+[ -f "${CONFIG}" ] || { echo "no such config: ${CONFIG}" >&2; exit 1; }
 # The _v2 suffix is not cosmetic.  The first attempt left a state.pt in
 # outputs/big_${TAG}_s${SEED}, and train_pibe.py resumes from state.pt
 # automatically -- pointing the corrected configs at the old directories would
 # silently continue the collapsed run instead of starting the fixed one.
-RUN="outputs/big_${TAG}_v2_s${SEED}"
+RUN="outputs/big_${TAG}_${VERSION}_s${SEED}"
 
 mkdir -p logs "${RUN}"
 
@@ -101,7 +108,7 @@ export MKL_NUM_THREADS="${OMP_NUM_THREADS}"
 echo "host      : $(hostname)"
 echo "partition : ${SLURM_JOB_PARTITION:-?}"
 echo "job       : ${SLURM_JOB_ID:-none}  array task ${IDX}"
-echo "config    : ${CONFIG}"
+echo "config    : ${CONFIG}  (version ${VERSION})"
 echo "seed      : ${SEED}"
 echo "run dir   : ${RUN}"
 echo "threads   : ${OMP_NUM_THREADS}"

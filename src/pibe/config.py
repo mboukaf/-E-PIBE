@@ -164,6 +164,13 @@ class DataConfig:
         ``noise_truncation_sigmas * noise_sigma``.
     train_fraction
         Fraction of trajectories in :math:`\Omega^{train}`.
+    theta_sampling_bound
+        Half-width of the interval each trajectory's :math:`\\theta` is drawn
+        from when ``sample_theta_per_trajectory`` is set.  Deliberately narrower
+        than the admissible :math:`\\Theta_j` the heads are reparameterized
+        onto: drawing right up to the box edge starts the truth where
+        ``tanh`` is already saturated, which is where the head's gradient dies.
+        Leave a margin.
     sample_disturbance_per_trajectory
         Draw an independent ``a`` for every trajectory.  This is the general
         case and the default: Eq. (2)'s ``a`` is an *unknown* the estimator must
@@ -191,6 +198,7 @@ class DataConfig:
     train_fraction: float = 0.8
     sample_disturbance_per_trajectory: bool = True
     sample_theta_per_trajectory: bool = False
+    theta_sampling_bound: float = 0.25
     seed: int = 0
 
     def __post_init__(self) -> None:

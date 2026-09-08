@@ -195,9 +195,19 @@ def build_experiment(config: RunConfig) -> Experiment:
     t_data = uniform_grid(0.0, horizon, config.data.n_samples, dtype=dtype)
     theta_per_traj = None
     if config.data.sample_theta_per_trajectory:
-        lo, hi = system.theta_bounds[:, 0], system.theta_bounds[:, 1]
+        # Drawn from a box strictly inside the admissible Theta_j the parameter
+        # heads map onto.  Sampling to the edge would place the truth where the
+        # head's tanh is already saturated and its gradient is numerically zero.
+        bound = config.data.theta_sampling_bound
+        limit = 0.5 * (system.theta_bounds[:, 1] - system.theta_bounds[:, 0])
+        if bound >= float(limit.min()):
+            raise ValueError(
+                f"theta_sampling_bound={bound} reaches or exceeds the admissible "
+                f"half-width {float(limit.min()):.4g}; leave a margin so the "
+                f"parameter heads are not initialised against their box edge"
+            )
         unit = torch.rand(n_traj, system.theta_dim, generator=data_generator, dtype=dtype)
-        theta_per_traj = 0.25 * (2.0 * unit - 1.0)
+        theta_per_traj = bound * (2.0 * unit - 1.0)
 
     dataset = generate_dataset(
         system=system,
