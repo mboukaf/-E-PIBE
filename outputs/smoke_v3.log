@@ -41,3 +41,25 @@ every basis function is observable above the noise floor.
 11:11:33 | INFO    | pibe.training.trainer |   cell 3 | i= 1000 | global | obj=2.6969e-03 | data=0.0000e+00 | phys=1.0963e-04 | |g|=8.72e-02
 11:12:02 | INFO    | pibe.training.trainer |   cell 3 | i= 1250 | global | obj=4.9032e-03 | data=0.0000e+00 | phys=5.1952e-05 | |g|=3.64e-01
 11:12:32 | INFO    | pibe.training.trainer |   cell 3 | i= 1500 | global | obj=2.4022e-03 | data=1.6392e-07 | phys=1.9625e-05 | |g|=2.81e-01
+11:13:04 | INFO    | pibe.training.trainer |   cell 3 | i= 1750 | global | obj=3.8978e-03 | data=1.8124e-07 | phys=1.3922e-05 | |g|=5.11e-02
+11:13:39 | INFO    | pibe.training.trainer |   cell 3 | i= 2000 | global | obj=2.1579e-03 | data=1.2150e-04 | phys=8.5934e-06 | |g|=6.59e-02
+11:14:09 | INFO    | pibe.training.trainer |   cell 3 | i= 2250 | global | obj=1.5915e-03 | data=1.2580e-04 | phys=8.2784e-05 | |g|=3.80e-02
+11:14:39 | INFO    | pibe.training.trainer |   cell 3 | i= 2499 | global | obj=1.7154e-03 | data=1.2860e-04 | phys=8.7834e-05 | |g|=6.26e-02
+11:14:39 | INFO    | pibe.training.trainer |   cell 3 done in 267.5s | val local=1.1424e-04 (data=7.3688e-05, phys=4.0552e-05)
+11:14:39 | INFO    | pibe.training.trainer | cell 4/4: 1000 local iterations then 1500 fine-tuning iterations
+11:14:39 | INFO    | pibe.training.trainer |   cell 4 | i=    0 | local  | obj=2.0952e+00 | data=1.4553e+00 | phys=6.3990e-01 | |g|=4.30e+01
+11:15:05 | INFO    | pibe.training.trainer |   cell 4 | i=  250 | local  | obj=1.6813e+00 | data=1.5223e+00 | phys=1.5903e-01 | |g|=1.88e+00
+11:15:32 | INFO    | pibe.training.trainer |   cell 4 | i=  500 | local  | obj=1.6761e+00 | data=1.4897e+00 | phys=1.8641e-01 | |g|=9.83e-01
+11:15:57 | INFO    | pibe.training.trainer |   cell 4 | i=  750 | local  | obj=1.6724e+00 | data=1.4002e+00 | phys=2.7228e-01 | |g|=2.73e+00
+11:16:23 | INFO    | pibe.training.trainer |   cell 4 | i= 1000 | global | obj=1.6324e+00 | data=1.4429e+00 | phys=1.8861e-01 | |g|=1.95e+01
+11:17:07 | INFO    | pibe.training.trainer |   cell 4 | i= 1250 | global | obj=1.7422e-02 | data=2.3263e-03 | phys=2.1680e-03 | |g|=2.64e+00
+11:17:51 | INFO    | pibe.training.trainer |   cell 4 | i= 1500 | global | obj=1.6161e-02 | data=1.1947e-03 | phys=1.8449e-03 | |g|=2.84e+00
+11:18:35 | INFO    | pibe.training.trainer |   cell 4 | i= 1750 | global | obj=2.4966e-02 | data=6.5841e-04 | phys=1.4199e-02 | |g|=9.85e+00
+11:19:19 | INFO    | pibe.training.trainer |   cell 4 | i= 2000 | global | obj=5.1000e-03 | data=3.2407e-04 | phys=1.3963e-03 | |g|=1.77e+00
+11:20:02 | INFO    | pibe.training.trainer |   cell 4 | i= 2250 | global | obj=3.0597e-03 | data=1.2701e-04 | phys=6.4337e-04 | |g|=2.38e+00
+11:20:47 | INFO    | pibe.training.trainer |   cell 4 | i= 2500 | global | obj=3.0413e-03 | data=3.4962e-04 | phys=5.9299e-04 | |g|=1.46e+00
+11:21:32 | INFO    | pibe.training.trainer |   cell 4 | i= 2750 | global | obj=2.4978e-03 | data=1.3252e-04 | phys=3.5934e-04 | |g|=1.71e+00
+11:22:17 | INFO    | pibe.training.trainer |   cell 4 | i= 3000 | global | obj=3.1882e-03 | data=5.5353e-05 | phys=9.9003e-04 | |g|=2.28e+00
+11:23:05 | INFO    | pibe.training.trainer |   cell 4 | i= 3250 | global | obj=3.1435e-03 | data=1.6141e-04 | phys=8.0772e-04 | |g|=2.45e+00
+11:23:53 | INFO    | pibe.training.trainer |   cell 4 | i= 3500 | global | obj=2.9390e-03 | data=5.2458e-05 | phys=1.4159e-03 | |g|=3.38e+00
+11:24:38 | INFO    | pibe.training.trainer |   cell 4 | i= 3750 | global | obj=2.3377e-03 | data=1.4413e-04 | phys=2.4110e-04 | |g|=6.35e-01
