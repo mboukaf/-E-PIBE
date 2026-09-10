@@ -193,6 +193,7 @@ class DataConfig:
     noise_bound: float | None = None
     noise_truncation_sigmas: float = 3.0
     noise_family: str = "gaussian"
+    noise_kwargs: dict[str, Any] = field(default_factory=dict)
     noise_bias: float = 0.0
     noise_bias_relative: bool = True
     train_fraction: float = 0.8
@@ -355,6 +356,12 @@ class EBMConfig:
     spectral_norm
         Spectral normalization of the energy MLP's layers, which turns the
         Lipschitz clause of (48) from an observation into a guarantee.
+    symmetric
+        Constrain each energy to be even, so its density is symmetric and its
+        mean is exactly zero.  This removes the translation degeneracy that
+        otherwise lets the state estimate and the density slide together at no
+        cost, and it forfeits Eq. (54) in exchange.  Use it when the noise is
+        known to be symmetric --- which is what Section 2 assumes.
     weight_bound
         Box for the projected EBM updates of Algorithm 2 lines 17 and 23,
         making :math:`\mathcal{K}_k` compact.  ``None`` disables the projection.
@@ -407,6 +414,7 @@ class EBMConfig:
     energy_scale: float = 1.0
     energy_bound: float = 12.0
     spectral_norm: bool = False
+    symmetric: bool = False
     weight_bound: float | None = 10.0
     panels: int = 64
     nodes_per_panel: int = 16

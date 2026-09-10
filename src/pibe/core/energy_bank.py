@@ -129,6 +129,7 @@ class EnergyEstimatorBank(EstimatorBank):
                     energy_scale=self.ebm_config.energy_scale,
                     energy_bound=self.ebm_config.energy_bound,
                     spectral_norm_layers=self.ebm_config.spectral_norm,
+                    symmetric=self.ebm_config.symmetric,
                     panels=self.ebm_config.panels,
                     nodes_per_panel=self.ebm_config.nodes_per_panel,
                     barrier_scale=self.ebm_config.barrier_scale,

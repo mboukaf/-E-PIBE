@@ -112,6 +112,7 @@ class ScalarEBM(nn.Module):
         energy_scale: float = 1.0,
         energy_bound: float | None = None,
         spectral_norm_layers: bool = False,
+        symmetric: bool = False,
         panels: int = 64,
         nodes_per_panel: int = 16,
         barrier_scale: float = 0.1,
@@ -130,6 +131,7 @@ class ScalarEBM(nn.Module):
             energy_scale=energy_scale,
             bound=energy_bound,
             spectral_norm_layers=spectral_norm_layers,
+            symmetric=symmetric,
         )
         self.quadrature = CompositeGaussLegendre(
             radius=radius, panels=panels, nodes_per_panel=nodes_per_panel, dtype=dtype

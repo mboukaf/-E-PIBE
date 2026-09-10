@@ -1,0 +1,35 @@
+16:02:21 | INFO    | train_pibe         | experiment:
+system            : automatica_n3v2(n=3) on cpu (torch.float64)
+true theta        : [0.23502650090327654, 0.10390993219989397]
+disturbance       : one a shared by all trajectories
+basis             : FourierBasis(q=3, H=2, omega=1.25664, horizon=[0, 20], periods=4)
+  lambda_min(W)   : 1.0000e+01   (Eq. 3, must be > 0)
+  eps_(d,q)       : 0.0000e+00
+noise             : TruncatedGaussianNoise(sigma=0.05, bound=0.15000000000000002)
+data              : TrajectoryData(P=64, N=201, n=3, horizon=[0, 20])
+  train / val     : 51 / 13
+  data fill h_d   : 5.0000e-02
+  coll fill h_r   : 2.5000e-02
+bank              : cells 2..4, 291050 parameters
+estimator         : PIBE (Algorithm 1)
+16:02:22 | INFO    | train_pibe         | disturbance observability  (sigma = 0.05, N = 201)
+  i |       gain |    settled |  signature |     SNR |  eff SNR |
+----------------------------------------------------------------------------
+  1 |  1.472e-01 |  1.395e-01 |  2.511e-02 |    0.50 |     7.12 |  <- below the noise floor
+  2 |  1.369e-01 |  1.401e-01 |  2.522e-02 |    0.50 |     7.15 |  <- below the noise floor
+  3 |  4.558e-02 |  3.413e-02 |  4.096e-03 |    0.08 |     1.16 |  <- below the noise floor
+
+basis function 3 leaves a trace 0.08x the noise; it is not
+recoverable pointwise. Reduce sigma, lower the basis frequency, lengthen the
+horizon, or reduce q -- training cannot help.
+16:02:22 | INFO    | pibe.training.trainer | cell 2/4: 3000 local iterations then 3000 fine-tuning iterations
+16:02:22 | INFO    | pibe.training.trainer |   cell 2 | i=    0 | local  | obj=1.1406e+01 | data=4.6209e+00 | phys=6.7851e+00 | |g|=5.26e+01
+16:02:38 | INFO    | pibe.training.trainer |   cell 2 | i=  500 | local  | obj=7.7947e-03 | data=5.7240e-03 | phys=2.0707e-03 | |g|=2.16e+00
+16:02:54 | INFO    | pibe.training.trainer |   cell 2 | i= 1000 | local  | obj=2.9452e-03 | data=2.8350e-03 | phys=1.1017e-04 | |g|=1.05e-01
+16:03:31 | INFO    | pibe.training.trainer |   cell 2 | i= 1500 | local  | obj=2.8080e-03 | data=2.7132e-03 | phys=9.4822e-05 | |g|=9.00e-02
+16:04:10 | INFO    | pibe.training.trainer |   cell 2 | i= 2000 | local  | obj=2.8552e-03 | data=2.7432e-03 | phys=1.1200e-04 | |g|=3.96e-01
+16:04:49 | INFO    | pibe.training.trainer |   cell 2 | i= 2500 | local  | obj=2.6261e-03 | data=2.5801e-03 | phys=4.5937e-05 | |g|=2.22e-01
+16:05:30 | INFO    | pibe.training.trainer |   cell 2 | i= 3000 | global | obj=2.4925e-03 | data=2.4514e-03 | phys=4.1155e-05 | |g|=4.15e-02
+16:06:06 | INFO    | pibe.training.trainer |   cell 2 | i= 3500 | global | obj=2.6131e-03 | data=2.5663e-03 | phys=4.6863e-05 | |g|=9.69e-02
+16:06:44 | INFO    | pibe.training.trainer |   cell 2 | i= 4000 | global | obj=2.4269e-03 | data=2.3979e-03 | phys=2.9006e-05 | |g|=1.83e-01
+16:07:25 | INFO    | pibe.training.trainer |   cell 2 | i= 4500 | global | obj=2.4851e-03 | data=2.4635e-03 | phys=2.1554e-05 | |g|=6.09e-02

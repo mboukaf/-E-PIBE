@@ -108,6 +108,10 @@ class EnergyNetwork(nn.Module):
         constant that matters for expressiveness: the density's dynamic range is
         :math:`e^{2\beta B_E}`, which must exceed :math:`2\bar\rho/\delta`
         for a residual law of width :math:`\delta`.
+    symmetric
+        Constrain the energy to be even in :math:`\xi`, so the density is
+        symmetric and :math:`\hat\mu_\omega = 0` exactly.  Removes the
+        translation degeneracy at the cost of Eq. (54); see :meth:`forward`.
     spectral_norm_layers
         Whether to spectrally normalize the linear layers.  Off by default, and
         the default is the point: pinning every spectral norm to 1 caps the
@@ -129,6 +133,7 @@ class EnergyNetwork(nn.Module):
         energy_scale: float = 1.0,
         bound: float | None = None,
         spectral_norm_layers: bool = False,
+        symmetric: bool = False,
     ) -> None:
         super().__init__()
         if radius <= 0:
@@ -141,6 +146,7 @@ class EnergyNetwork(nn.Module):
         if self.bound <= 0:
             raise ValueError(f"the energy bound must be positive, got {self.bound}")
         self.spectral_norm_layers = bool(spectral_norm_layers)
+        self.symmetric = bool(symmetric)
 
         self.mlp = MLP(
             in_dim=1, out_dim=1, hidden=hidden, activation=activation, bias=True
@@ -202,7 +208,24 @@ class EnergyNetwork(nn.Module):
         """
         shape = xi.shape
         u = (xi / self.radius).reshape(-1, 1)
-        raw = self.mlp(u).reshape(shape)
+        if self.symmetric:
+            # Average the network with its reflection, making the energy an even
+            # function of xi.  The density (49) is then symmetric and its mean is
+            # exactly zero -- which removes the translation degeneracy that has
+            # defeated every unconstrained run: the pair (state estimate,
+            # density) can no longer slide together, because the density cannot
+            # move.  All freedom over the *shape* is retained, so the class still
+            # spans peaked, flat and heavy-tailed laws.
+            #
+            # No generality is lost where it is used: Section 2 and Proposition 1
+            # already assume symmetric zero-mean measurement noise.  It does
+            # forfeit Eq. (54) -- a symmetric density cannot report a nonzero
+            # mu_omega -- so this is for the symmetric-noise case only, and the
+            # biased-sensor problem needs the unconstrained class (or the
+            # simulation-based estimate of scripts/offset_by_shooting.py).
+            raw = 0.5 * (self.mlp(u) + self.mlp(-u)).reshape(shape)
+        else:
+            raw = self.mlp(u).reshape(shape)
 
         # Eq. (47): the gauge is fixed by the network's own value at zero, so it
         # moves with the parameters and stays exact rather than being tracked.

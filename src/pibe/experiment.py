@@ -138,6 +138,7 @@ def build_noise(config: RunConfig) -> NoiseModel:
         data.noise_sigma,
         bias=data.noise_bias,
         bias_relative=data.noise_bias_relative,
+        **data.noise_kwargs,
     )
 
 

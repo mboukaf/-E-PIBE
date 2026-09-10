@@ -1,0 +1,35 @@
+16:02:19 | INFO    | train_pibe         | experiment:
+system            : automatica_n3v2(n=3) on cpu (torch.float64)
+true theta        : [0.23502650090327654, 0.10390993219989397]
+disturbance       : one a shared by all trajectories
+basis             : FourierBasis(q=3, H=2, omega=1.25664, horizon=[0, 20], periods=4)
+  lambda_min(W)   : 1.0000e+01   (Eq. 3, must be > 0)
+  eps_(d,q)       : 0.0000e+00
+noise             : ContaminatedGaussianNoise(sigma=0.05, bound=0.5971)
+data              : TrajectoryData(P=64, N=201, n=3, horizon=[0, 20])
+  train / val     : 51 / 13
+  data fill h_d   : 5.0000e-02
+  coll fill h_r   : 2.5000e-02
+bank              : cells 2..4, 291050 parameters
+estimator         : PIBE (Algorithm 1)
+16:02:19 | INFO    | train_pibe         | disturbance observability  (sigma = 0.05, N = 201)
+  i |       gain |    settled |  signature |     SNR |  eff SNR |
+----------------------------------------------------------------------------
+  1 |  1.472e-01 |  1.395e-01 |  2.511e-02 |    0.50 |     7.12 |  <- below the noise floor
+  2 |  1.369e-01 |  1.401e-01 |  2.522e-02 |    0.50 |     7.15 |  <- below the noise floor
+  3 |  4.558e-02 |  3.413e-02 |  4.096e-03 |    0.08 |     1.16 |  <- below the noise floor
+
+basis function 3 leaves a trace 0.08x the noise; it is not
+recoverable pointwise. Reduce sigma, lower the basis frequency, lengthen the
+horizon, or reduce q -- training cannot help.
+16:02:19 | INFO    | pibe.training.trainer | cell 2/4: 3000 local iterations then 3000 fine-tuning iterations
+16:02:20 | INFO    | pibe.training.trainer |   cell 2 | i=    0 | local  | obj=1.1397e+01 | data=4.6025e+00 | phys=6.7942e+00 | |g|=5.33e+01
+16:02:35 | INFO    | pibe.training.trainer |   cell 2 | i=  500 | local  | obj=4.7242e-03 | data=4.4111e-03 | phys=3.1309e-04 | |g|=1.25e+00
+16:02:51 | INFO    | pibe.training.trainer |   cell 2 | i= 1000 | local  | obj=3.5673e-03 | data=3.4057e-03 | phys=1.6163e-04 | |g|=5.51e-01
+16:03:23 | INFO    | pibe.training.trainer |   cell 2 | i= 1500 | local  | obj=2.7306e-03 | data=2.6364e-03 | phys=9.4249e-05 | |g|=9.57e-02
+16:04:03 | INFO    | pibe.training.trainer |   cell 2 | i= 2000 | local  | obj=2.7507e-03 | data=2.6569e-03 | phys=9.3721e-05 | |g|=2.72e-01
+16:04:41 | INFO    | pibe.training.trainer |   cell 2 | i= 2500 | local  | obj=2.8083e-03 | data=2.7605e-03 | phys=4.7856e-05 | |g|=8.88e-02
+16:05:21 | INFO    | pibe.training.trainer |   cell 2 | i= 3000 | global | obj=2.6031e-03 | data=2.5541e-03 | phys=4.8987e-05 | |g|=1.56e-01
+16:05:58 | INFO    | pibe.training.trainer |   cell 2 | i= 3500 | global | obj=3.0870e-03 | data=3.0354e-03 | phys=5.1624e-05 | |g|=1.93e-01
+16:06:36 | INFO    | pibe.training.trainer |   cell 2 | i= 4000 | global | obj=2.9174e-03 | data=2.8759e-03 | phys=4.1526e-05 | |g|=2.07e-01
+16:07:16 | INFO    | pibe.training.trainer |   cell 2 | i= 4500 | global | obj=2.6825e-03 | data=2.6601e-03 | phys=2.2421e-05 | |g|=2.02e-02
