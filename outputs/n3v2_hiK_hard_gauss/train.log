@@ -70,3 +70,59 @@ horizon, or reduce q -- training cannot help.
 16:31:11 | INFO    | pibe.training.trainer |   cell 4 | i= 7000 | global | obj=1.5454e-03 | data=8.0657e-06 | phys=7.7101e-05 | |g|=3.45e-01
 16:32:01 | INFO    | pibe.training.trainer |   cell 4 | i= 7500 | global | obj=1.6058e-03 | data=2.0328e-05 | phys=7.6733e-05 | |g|=3.61e-01
 16:32:53 | INFO    | pibe.training.trainer |   cell 4 | i= 8000 | global | obj=1.5066e-03 | data=5.1428e-06 | phys=9.8796e-06 | |g|=5.69e-02
+16:33:46 | INFO    | pibe.training.trainer |   cell 4 | i= 8500 | global | obj=1.5783e-03 | data=6.7825e-06 | phys=1.0571e-04 | |g|=3.43e-01
+16:34:36 | INFO    | pibe.training.trainer |   cell 4 | i= 9000 | global | obj=1.4982e-03 | data=9.2037e-06 | phys=2.2355e-05 | |g|=1.77e-01
+16:35:26 | INFO    | pibe.training.trainer |   cell 4 | i= 9500 | global | obj=1.5508e-03 | data=3.0479e-06 | phys=8.2933e-06 | |g|=7.71e-02
+16:36:16 | INFO    | pibe.training.trainer |   cell 4 | i=10000 | global | obj=1.4937e-03 | data=3.5505e-06 | phys=5.3071e-06 | |g|=4.42e-02
+16:37:06 | INFO    | pibe.training.trainer |   cell 4 | i=10500 | global | obj=1.4151e-03 | data=2.0339e-06 | phys=3.2306e-06 | |g|=2.51e-02
+16:38:01 | INFO    | pibe.training.trainer |   cell 4 | i=11000 | global | obj=1.4897e-03 | data=2.3373e-06 | phys=1.3115e-05 | |g|=1.39e-01
+16:38:53 | INFO    | pibe.training.trainer |   cell 4 | i=11500 | global | obj=1.5445e-03 | data=1.8056e-06 | phys=8.1871e-06 | |g|=7.96e-02
+16:39:41 | INFO    | pibe.training.trainer |   cell 4 | i=12000 | global | obj=1.4860e-03 | data=1.9001e-06 | phys=5.0431e-06 | |g|=2.44e-02
+16:40:30 | INFO    | pibe.training.trainer |   cell 4 | i=12500 | global | obj=1.4458e-03 | data=1.6549e-06 | phys=3.5912e-06 | |g|=2.20e-02
+16:41:18 | INFO    | pibe.training.trainer |   cell 4 | i=13000 | global | obj=1.4331e-03 | data=1.6257e-06 | phys=3.8153e-06 | |g|=2.44e-02
+16:42:06 | INFO    | pibe.training.trainer |   cell 4 | i=13500 | global | obj=1.4754e-03 | data=1.3301e-06 | phys=3.2389e-06 | |g|=7.79e-03
+16:42:54 | INFO    | pibe.training.trainer |   cell 4 | i=14000 | global | obj=1.4532e-03 | data=1.9090e-06 | phys=3.8320e-06 | |g|=3.05e-02
+16:43:42 | INFO    | pibe.training.trainer |   cell 4 | i=14500 | global | obj=1.4365e-03 | data=1.0026e-06 | phys=2.4130e-06 | |g|=7.23e-03
+16:44:30 | INFO    | pibe.training.trainer |   cell 4 | i=15000 | global | obj=1.4643e-03 | data=1.2000e-06 | phys=3.2746e-06 | |g|=4.58e-03
+16:45:18 | INFO    | pibe.training.trainer |   cell 4 | i=15500 | global | obj=1.4850e-03 | data=1.4459e-06 | phys=3.7955e-06 | |g|=6.70e-03
+16:46:05 | INFO    | pibe.training.trainer |   cell 4 | i=15999 | global | obj=1.4882e-03 | data=1.3625e-06 | phys=3.7549e-06 | |g|=4.25e-03
+16:46:05 | INFO    | pibe.training.trainer |   cell 4 done in 1481.9s | val local=1.9344e-05 (data=2.9373e-06, phys=1.6406e-05)
+16:46:05 | INFO    | train_pibe         | train metrics:
+state errors (L2 / sup):
+  x_1: 6.7215e-03 / 7.5522e-02
+  x_2: 5.2087e-02 / 2.7765e-01
+  x_3: 5.8999e-02 / 7.1572e-01
+parameter errors (|err| / spread):
+  theta_1: 3.4835e-02 / 1.3689e-02
+  theta_2: 2.9937e-02 / 1.1232e-02
+disturbance: L2=2.1909e-02, sup=6.9667e-02
+output fit: L2=4.8867e-02
+16:46:05 | INFO    | train_pibe         | val metrics:
+state errors (L2 / sup):
+  x_1: 9.0099e-03 / 5.4688e-02
+  x_2: 4.2107e-02 / 2.4694e-01
+  x_3: 4.8567e-02 / 6.7354e-01
+parameter errors (|err| / spread):
+  theta_1: 2.6856e-02 / 1.3761e-02
+  theta_2: 2.3712e-02 / 1.1987e-02
+disturbance: L2=2.1088e-02, sup=5.1516e-02
+output fit: L2=4.8944e-02
+16:46:08 | INFO    | train_pibe         | oracle comparison (train):
+ cell |   L_Loc @ truth | L_Loc @ trained | winner
+------------------------------------------------------------
+    2 |      2.4635e-03 |      2.4066e-03 | trained
+    3 |      5.4338e-36 |      4.6344e-06 | truth
+    4 |      2.6223e-35 |      4.5054e-06 | truth
+------------------------------------------------------------
+L_Tot @ truth   : 1.4942e-03
+L_Tot @ trained : 1.4678e-03
+noise floor     : 2.4333e-03 (the cell-2 data term cannot honestly go below this)
+
+verdict: loss-design failure: the objective scores the trained solution at or below the truth, so optimization cannot recover the parameters. This is the Remark 7 degeneracy; it needs excitation (Assumption 6) or extra information, not more training.
+16:46:08 | INFO    | pibe.eval.figures  | wrote outputs/n3v2_hiK_hard_gauss/figures/states.png
+16:46:08 | INFO    | pibe.eval.figures  | wrote outputs/n3v2_hiK_hard_gauss/figures/disturbance.png
+16:46:09 | INFO    | matplotlib.mathtext | Substituting symbol A from STIXNonUnicode
+16:46:09 | INFO    | pibe.eval.figures  | wrote outputs/n3v2_hiK_hard_gauss/figures/parameters.png
+16:46:09 | INFO    | pibe.eval.figures  | wrote outputs/n3v2_hiK_hard_gauss/figures/errors.png
+16:46:09 | INFO    | train_pibe         | figures: states.png, disturbance.png, parameters.png, errors.png
+16:46:09 | INFO    | train_pibe         | artifacts written to outputs/n3v2_hiK_hard_gauss

@@ -1,0 +1,31 @@
+16:47:09 | INFO    | train_pibe         | experiment:
+system            : automatica_n3v2(n=3) on cpu (torch.float64)
+true theta        : [0.23502650090327654, 0.10390993219989397]
+disturbance       : one a shared by all trajectories
+basis             : FourierBasis(q=3, H=2, omega=1.25664, horizon=[0, 20], periods=4)
+  lambda_min(W)   : 1.0000e+01   (Eq. 3, must be > 0)
+  eps_(d,q)       : 0.0000e+00
+noise             : TruncatedGaussianNoise(sigma=0.05, bound=0.15000000000000002)
+data              : TrajectoryData(P=64, N=201, n=3, horizon=[0, 20])
+  train / val     : 51 / 13
+  data fill h_d   : 5.0000e-02
+  coll fill h_r   : 2.5000e-02
+bank              : cells 2..4, 306410 parameters
+estimator         : PIBE (Algorithm 1)
+16:47:09 | INFO    | train_pibe         | disturbance observability  (sigma = 0.05, N = 201)
+  i |       gain |    settled |  signature |     SNR |  eff SNR |
+----------------------------------------------------------------------------
+  1 |  1.472e-01 |  1.395e-01 |  2.511e-02 |    0.50 |     7.12 |  <- below the noise floor
+  2 |  1.369e-01 |  1.401e-01 |  2.522e-02 |    0.50 |     7.15 |  <- below the noise floor
+  3 |  4.558e-02 |  3.413e-02 |  4.096e-03 |    0.08 |     1.16 |  <- below the noise floor
+
+basis function 3 leaves a trace 0.08x the noise; it is not
+recoverable pointwise. Reduce sigma, lower the basis frequency, lengthen the
+horizon, or reduce q -- training cannot help.
+16:47:09 | INFO    | pibe.training.trainer | cell 2/4: 3000 local iterations then 3000 fine-tuning iterations
+16:47:10 | INFO    | pibe.training.trainer |   cell 2 | i=    0 | local  | obj=1.5176e+01 | data=1.2153e+01 | phys=3.0229e+00 | |g|=6.52e+01
+16:47:39 | INFO    | pibe.training.trainer |   cell 2 | i=  500 | local  | obj=7.8727e-03 | data=7.0848e-03 | phys=7.8793e-04 | |g|=1.90e+00
+16:48:10 | INFO    | pibe.training.trainer |   cell 2 | i= 1000 | local  | obj=3.0328e-03 | data=2.9303e-03 | phys=1.0244e-04 | |g|=1.68e-01
+16:48:41 | INFO    | pibe.training.trainer |   cell 2 | i= 1500 | local  | obj=2.8475e-03 | data=2.7732e-03 | phys=7.4363e-05 | |g|=4.59e-02
+16:49:12 | INFO    | pibe.training.trainer |   cell 2 | i= 2000 | local  | obj=2.9900e-03 | data=2.8584e-03 | phys=1.3167e-04 | |g|=4.70e-01
+16:49:42 | INFO    | pibe.training.trainer |   cell 2 | i= 2500 | local  | obj=2.6159e-03 | data=2.5595e-03 | phys=5.6471e-05 | |g|=1.40e-01
