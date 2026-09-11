@@ -1,0 +1,127 @@
+10:27:30 | INFO    | train_pibe         | experiment:
+system            : automatica_n3v2(n=3) on cpu (torch.float64)
+true theta        : [0.23502650090327654, 0.10390993219989397]
+disturbance       : one a shared by all trajectories
+basis             : FourierBasis(q=3, H=2, omega=1.25664, horizon=[0, 20], periods=4)
+  lambda_min(W)   : 1.0000e+01   (Eq. 3, must be > 0)
+  eps_(d,q)       : 0.0000e+00
+noise             : BiasedNoise(TruncatedGaussianNoise(sigma=0.05, bound=0.15000000000000002), bias=+0.05)
+data              : TrajectoryData(P=64, N=201, n=3, horizon=[0, 20])
+  train / val     : 51 / 13
+  data fill h_d   : 5.0000e-02
+  coll fill h_r   : 2.5000e-02
+bank              : cells 2..4, 271850 parameters
+estimator         : PIBE (Algorithm 1)
+10:27:30 | INFO    | train_pibe         | disturbance observability  (sigma = 0.05, N = 201)
+  i |       gain |    settled |  signature |     SNR |  eff SNR |
+----------------------------------------------------------------------------
+  1 |  1.472e-01 |  1.395e-01 |  2.511e-02 |    0.50 |     7.12 |  <- below the noise floor
+  2 |  1.369e-01 |  1.401e-01 |  2.522e-02 |    0.50 |     7.15 |  <- below the noise floor
+  3 |  4.558e-02 |  3.413e-02 |  4.096e-03 |    0.08 |     1.16 |  <- below the noise floor
+
+basis function 3 leaves a trace 0.08x the noise; it is not
+recoverable pointwise. Reduce sigma, lower the basis frequency, lengthen the
+horizon, or reduce q -- training cannot help.
+10:27:30 | INFO    | pibe.training.trainer | cell 2/4: 3000 local iterations then 3000 fine-tuning iterations
+10:27:31 | INFO    | pibe.training.trainer |   cell 2 | i=    0 | local  | obj=1.2626e+01 | data=1.2342e+01 | phys=2.8402e-01 | |g|=7.38e+01
+10:27:45 | INFO    | pibe.training.trainer |   cell 2 | i=  500 | local  | obj=7.3833e-03 | data=6.9570e-03 | phys=4.2634e-04 | |g|=1.93e+00
+10:28:02 | INFO    | pibe.training.trainer |   cell 2 | i= 1000 | local  | obj=2.9486e-03 | data=2.8996e-03 | phys=4.9024e-05 | |g|=1.89e-01
+10:28:18 | INFO    | pibe.training.trainer |   cell 2 | i= 1500 | local  | obj=2.9801e-03 | data=2.8661e-03 | phys=1.1397e-04 | |g|=1.35e-01
+10:28:34 | INFO    | pibe.training.trainer |   cell 2 | i= 2000 | local  | obj=2.7708e-03 | data=2.7136e-03 | phys=5.7224e-05 | |g|=2.22e-01
+10:28:50 | INFO    | pibe.training.trainer |   cell 2 | i= 2500 | local  | obj=2.5759e-03 | data=2.5394e-03 | phys=3.6511e-05 | |g|=2.36e-02
+10:29:07 | INFO    | pibe.training.trainer |   cell 2 | i= 3000 | global | obj=2.5285e-03 | data=2.4685e-03 | phys=5.9960e-05 | |g|=9.64e-02
+10:29:23 | INFO    | pibe.training.trainer |   cell 2 | i= 3500 | global | obj=2.6243e-03 | data=2.5923e-03 | phys=3.2031e-05 | |g|=7.01e-02
+10:29:39 | INFO    | pibe.training.trainer |   cell 2 | i= 4000 | global | obj=2.4209e-03 | data=2.3985e-03 | phys=2.2427e-05 | |g|=3.41e-02
+10:29:56 | INFO    | pibe.training.trainer |   cell 2 | i= 4500 | global | obj=2.4927e-03 | data=2.4725e-03 | phys=2.0186e-05 | |g|=1.47e-02
+10:30:13 | INFO    | pibe.training.trainer |   cell 2 | i= 5000 | global | obj=2.4889e-03 | data=2.4683e-03 | phys=2.0622e-05 | |g|=6.58e-02
+10:30:29 | INFO    | pibe.training.trainer |   cell 2 | i= 5500 | global | obj=2.4482e-03 | data=2.4318e-03 | phys=1.6457e-05 | |g|=6.13e-03
+10:30:45 | INFO    | pibe.training.trainer |   cell 2 | i= 5999 | global | obj=2.3878e-03 | data=2.3734e-03 | phys=1.4395e-05 | |g|=1.62e-02
+10:30:45 | INFO    | pibe.training.trainer |   cell 2 done in 195.1s | val local=2.5295e-03 (data=2.4622e-03, phys=6.7284e-05)
+10:30:45 | INFO    | pibe.training.trainer | cell 3/4: 3000 local iterations then 3000 fine-tuning iterations
+10:30:45 | INFO    | pibe.training.trainer |   cell 3 | i=    0 | local  | obj=6.0570e-01 | data=5.1996e-01 | phys=8.5740e-02 | |g|=6.85e+00
+10:31:09 | INFO    | pibe.training.trainer |   cell 3 | i=  500 | local  | obj=5.8022e-04 | data=3.6588e-04 | phys=2.1434e-04 | |g|=1.03e-01
+10:31:34 | INFO    | pibe.training.trainer |   cell 3 | i= 1000 | local  | obj=2.4472e-04 | data=1.5022e-04 | phys=9.4505e-05 | |g|=1.48e-01
+10:32:00 | INFO    | pibe.training.trainer |   cell 3 | i= 1500 | local  | obj=1.3209e-04 | data=5.7788e-05 | phys=7.4303e-05 | |g|=7.89e-02
+10:32:28 | INFO    | pibe.training.trainer |   cell 3 | i= 2000 | local  | obj=5.8927e-05 | data=3.6894e-05 | phys=2.2033e-05 | |g|=3.03e-02
+10:33:03 | INFO    | pibe.training.trainer |   cell 3 | i= 2500 | local  | obj=5.9212e-05 | data=2.9627e-05 | phys=2.9585e-05 | |g|=4.67e-02
+10:33:31 | INFO    | pibe.training.trainer |   cell 3 | i= 3000 | global | obj=1.8311e-03 | data=2.5774e-05 | phys=1.3055e-05 | |g|=2.14e-02
+10:34:05 | INFO    | pibe.training.trainer |   cell 3 | i= 3500 | global | obj=1.7822e-03 | data=3.9286e-05 | phys=9.0991e-06 | |g|=1.35e-01
+10:34:45 | INFO    | pibe.training.trainer |   cell 3 | i= 4000 | global | obj=1.8463e-03 | data=1.3113e-05 | phys=8.4192e-06 | |g|=5.35e-02
+10:35:25 | INFO    | pibe.training.trainer |   cell 3 | i= 4500 | global | obj=1.7767e-03 | data=1.0818e-05 | phys=6.5984e-06 | |g|=5.53e-02
+10:36:04 | INFO    | pibe.training.trainer |   cell 3 | i= 5000 | global | obj=1.8067e-03 | data=7.3184e-06 | phys=4.1924e-06 | |g|=4.45e-02
+10:36:39 | INFO    | pibe.training.trainer |   cell 3 | i= 5500 | global | obj=1.7360e-03 | data=4.6435e-06 | phys=3.5847e-06 | |g|=1.69e-02
+10:37:14 | INFO    | pibe.training.trainer |   cell 3 | i= 5999 | global | obj=1.7638e-03 | data=6.1403e-06 | phys=4.0346e-06 | |g|=5.70e-03
+10:37:14 | INFO    | pibe.training.trainer |   cell 3 done in 389.2s | val local=3.6564e-05 (data=2.4827e-05, phys=1.1737e-05)
+10:37:14 | INFO    | pibe.training.trainer | cell 4/4: 3000 local iterations then 3000 fine-tuning iterations
+10:37:14 | INFO    | pibe.training.trainer |   cell 4 | i=    0 | local  | obj=3.5744e+00 | data=3.9786e-01 | phys=3.1766e+00 | |g|=1.88e+01
+10:37:47 | INFO    | pibe.training.trainer |   cell 4 | i=  500 | local  | obj=3.8763e-01 | data=3.5883e-01 | phys=2.8804e-02 | |g|=2.78e+00
+10:38:19 | INFO    | pibe.training.trainer |   cell 4 | i= 1000 | local  | obj=3.7205e-01 | data=3.4155e-01 | phys=3.0493e-02 | |g|=1.42e+00
+10:38:49 | INFO    | pibe.training.trainer |   cell 4 | i= 1500 | local  | obj=3.6904e-01 | data=3.2920e-01 | phys=3.9833e-02 | |g|=3.50e-01
+10:39:21 | INFO    | pibe.training.trainer |   cell 4 | i= 2000 | local  | obj=3.7091e-01 | data=3.3481e-01 | phys=3.6098e-02 | |g|=7.48e-01
+10:39:54 | INFO    | pibe.training.trainer |   cell 4 | i= 2500 | local  | obj=3.7033e-01 | data=3.3103e-01 | phys=3.9301e-02 | |g|=4.05e-01
+10:40:26 | INFO    | pibe.training.trainer |   cell 4 | i= 3000 | global | obj=3.7213e-01 | data=3.1659e-01 | phys=5.4071e-02 | |g|=9.77e+00
+10:41:20 | INFO    | pibe.training.trainer |   cell 4 | i= 3500 | global | obj=2.1901e-03 | data=6.3950e-05 | phys=4.3701e-04 | |g|=9.44e-01
+10:42:12 | INFO    | pibe.training.trainer |   cell 4 | i= 4000 | global | obj=1.6654e-03 | data=3.6231e-05 | phys=2.0509e-05 | |g|=7.25e-02
+10:43:02 | INFO    | pibe.training.trainer |   cell 4 | i= 4500 | global | obj=1.7002e-03 | data=2.4980e-05 | phys=3.2992e-05 | |g|=1.73e-01
+10:43:52 | INFO    | pibe.training.trainer |   cell 4 | i= 5000 | global | obj=1.6980e-03 | data=4.3658e-05 | phys=4.5492e-05 | |g|=2.15e-01
+10:44:39 | INFO    | pibe.training.trainer |   cell 4 | i= 5500 | global | obj=1.7327e-03 | data=3.6806e-05 | phys=1.1568e-04 | |g|=4.34e-01
+10:45:28 | INFO    | pibe.training.trainer |   cell 4 | i= 6000 | global | obj=1.6432e-03 | data=2.6488e-05 | phys=1.7917e-05 | |g|=2.13e-01
+10:46:15 | INFO    | pibe.training.trainer |   cell 4 | i= 6500 | global | obj=1.5521e-03 | data=2.2790e-05 | phys=1.8721e-05 | |g|=1.33e-01
+10:47:03 | INFO    | pibe.training.trainer |   cell 4 | i= 7000 | global | obj=1.5901e-03 | data=9.2962e-06 | phys=9.0201e-05 | |g|=3.24e-01
+10:47:51 | INFO    | pibe.training.trainer |   cell 4 | i= 7500 | global | obj=1.7535e-03 | data=3.1503e-05 | phys=1.5050e-04 | |g|=4.99e-01
+10:48:39 | INFO    | pibe.training.trainer |   cell 4 | i= 8000 | global | obj=1.5215e-03 | data=5.5003e-06 | phys=2.0448e-05 | |g|=1.50e-01
+10:49:27 | INFO    | pibe.training.trainer |   cell 4 | i= 8500 | global | obj=1.4796e-03 | data=7.4900e-06 | phys=2.7959e-05 | |g|=2.02e-01
+10:50:15 | INFO    | pibe.training.trainer |   cell 4 | i= 9000 | global | obj=1.4947e-03 | data=3.9898e-06 | phys=3.0782e-05 | |g|=1.85e-01
+10:51:03 | INFO    | pibe.training.trainer |   cell 4 | i= 9500 | global | obj=1.5394e-03 | data=4.2028e-06 | phys=1.0804e-05 | |g|=1.03e-01
+10:54:36 | INFO    | pibe.training.trainer |   cell 4 | i=10000 | global | obj=1.4933e-03 | data=4.4684e-06 | phys=1.4513e-05 | |g|=1.04e-01
+10:55:24 | INFO    | pibe.training.trainer |   cell 4 | i=10500 | global | obj=1.4410e-03 | data=2.2837e-06 | phys=1.7972e-05 | |g|=1.59e-01
+10:56:14 | INFO    | pibe.training.trainer |   cell 4 | i=11000 | global | obj=1.4666e-03 | data=3.6936e-06 | phys=3.9185e-06 | |g|=4.36e-02
+10:57:02 | INFO    | pibe.training.trainer |   cell 4 | i=11500 | global | obj=1.5305e-03 | data=2.1202e-06 | phys=3.8478e-06 | |g|=1.41e-02
+10:57:53 | INFO    | pibe.training.trainer |   cell 4 | i=12000 | global | obj=1.4791e-03 | data=2.3009e-06 | phys=4.2643e-06 | |g|=2.14e-02
+10:58:42 | INFO    | pibe.training.trainer |   cell 4 | i=12500 | global | obj=1.4429e-03 | data=1.8922e-06 | phys=6.3989e-06 | |g|=8.27e-02
+10:59:33 | INFO    | pibe.training.trainer |   cell 4 | i=13000 | global | obj=1.4298e-03 | data=1.9455e-06 | phys=4.3775e-06 | |g|=3.98e-02
+11:00:22 | INFO    | pibe.training.trainer |   cell 4 | i=13500 | global | obj=1.4680e-03 | data=1.8049e-06 | phys=2.9528e-06 | |g|=8.41e-03
+11:01:11 | INFO    | pibe.training.trainer |   cell 4 | i=14000 | global | obj=1.4434e-03 | data=2.3065e-06 | phys=3.1775e-06 | |g|=9.14e-03
+11:02:00 | INFO    | pibe.training.trainer |   cell 4 | i=14500 | global | obj=1.4331e-03 | data=1.4765e-06 | phys=2.7383e-06 | |g|=8.05e-03
+11:02:51 | INFO    | pibe.training.trainer |   cell 4 | i=15000 | global | obj=1.4553e-03 | data=1.6425e-06 | phys=3.2532e-06 | |g|=6.62e-03
+11:03:40 | INFO    | pibe.training.trainer |   cell 4 | i=15500 | global | obj=1.4772e-03 | data=2.0302e-06 | phys=3.3402e-06 | |g|=6.82e-03
+11:04:30 | INFO    | pibe.training.trainer |   cell 4 | i=15999 | global | obj=1.4833e-03 | data=1.8984e-06 | phys=3.1021e-06 | |g|=4.71e-03
+11:04:30 | INFO    | pibe.training.trainer |   cell 4 done in 1487.6s | val local=2.8608e-05 (data=7.5214e-06, phys=2.1086e-05)
+11:04:30 | INFO    | train_pibe         | train metrics:
+state errors (L2 / sup):
+  x_1: 5.0385e-02 / 1.1046e-01
+  x_2: 1.5151e-02 / 2.1465e-01
+  x_3: 3.0343e-02 / 4.7585e-01
+parameter errors (|err| / spread):
+  theta_1: 7.4088e-03 / 7.7206e-03
+  theta_2: 9.8201e-03 / 6.1559e-03
+disturbance: L2=2.1276e-02, sup=5.1914e-02
+output fit: L2=4.8761e-02
+11:04:30 | INFO    | train_pibe         | val metrics:
+state errors (L2 / sup):
+  x_1: 5.0609e-02 / 1.0740e-01
+  x_2: 1.9532e-02 / 2.2956e-01
+  x_3: 3.1984e-02 / 3.3418e-01
+parameter errors (|err| / spread):
+  theta_1: 5.6414e-03 / 5.6741e-03
+  theta_2: 1.5657e-02 / 4.1618e-03
+disturbance: L2=2.1198e-02, sup=4.6643e-02
+output fit: L2=4.9274e-02
+11:04:33 | INFO    | train_pibe         | oracle comparison (train):
+ cell |   L_Loc @ truth | L_Loc @ trained | winner
+------------------------------------------------------------
+    2 |      4.9546e-03 |      2.3941e-03 | trained
+    3 |      5.4338e-36 |      4.4650e-06 | truth
+    4 |      2.6223e-35 |      4.6651e-06 | truth
+------------------------------------------------------------
+L_Tot @ truth   : 3.0051e-03
+L_Tot @ trained : 1.4602e-03
+
+verdict: loss-design failure: the objective scores the trained solution at or below the truth, so optimization cannot recover the parameters. This is the Remark 7 degeneracy; it needs excitation (Assumption 6) or extra information, not more training.
+11:04:34 | INFO    | pibe.eval.figures  | wrote outputs/bb_pibe_b0.05/figures/states.png
+11:04:34 | INFO    | pibe.eval.figures  | wrote outputs/bb_pibe_b0.05/figures/disturbance.png
+11:04:34 | INFO    | matplotlib.mathtext | Substituting symbol A from STIXNonUnicode
+11:04:34 | INFO    | pibe.eval.figures  | wrote outputs/bb_pibe_b0.05/figures/parameters.png
+11:04:34 | INFO    | pibe.eval.figures  | wrote outputs/bb_pibe_b0.05/figures/errors.png
+11:04:34 | INFO    | train_pibe         | figures: states.png, disturbance.png, parameters.png, errors.png
+11:04:34 | INFO    | train_pibe         | artifacts written to outputs/bb_pibe_b0.05

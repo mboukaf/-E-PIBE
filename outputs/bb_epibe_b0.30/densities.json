@@ -1,0 +1,11 @@
+{
+  "2": {
+    "mean": -0.1768120693048336,
+    "std": 0.047892360064667405,
+    "log_partition": 5.580969691277719,
+    "normalization_error": 0.0,
+    "radius": 1.2
+  },
+  "mu_omega_hat": -0.1768120693048336,
+  "true_noise_bias": 0.3
+}
