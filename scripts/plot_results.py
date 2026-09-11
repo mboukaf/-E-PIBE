@@ -16,7 +16,7 @@ Writes PNG figures next to the run directory:
 
 Usage::
 
-    python scripts/plot_results.py --run outputs/t5
+    python scripts/plot_results.py --run outputs/big_w10_v2_s1
 """
 
 from __future__ import annotations

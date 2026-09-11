@@ -26,7 +26,7 @@ EST = "#eb6834"
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--scan", type=Path, default=Path("outputs/epibe_scan/scan.json"))
+    parser.add_argument("--scan", type=Path, default=Path("outputs/_evidence/epibe_scan/scan.json"))
     parser.add_argument("--true-bias", type=float, default=0.05)
     parser.add_argument("--pibe-x1", type=float, default=None,
                         help="the PIBE control's x1 error, for reference")
