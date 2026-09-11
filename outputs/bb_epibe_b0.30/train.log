@@ -1,0 +1,35 @@
+09:49:43 | INFO    | train_pibe         | experiment:
+system            : automatica_n3v2(n=3) on cpu (torch.float64)
+true theta        : [0.23502650090327654, 0.10390993219989397]
+disturbance       : one a shared by all trajectories
+basis             : FourierBasis(q=3, H=2, omega=1.25664, horizon=[0, 20], periods=4)
+  lambda_min(W)   : 1.0000e+01   (Eq. 3, must be > 0)
+  eps_(d,q)       : 0.0000e+00
+noise             : BiasedNoise(TruncatedGaussianNoise(sigma=0.05, bound=0.15000000000000002), bias=+0.3)
+data              : TrajectoryData(P=64, N=201, n=3, horizon=[0, 20])
+  train / val     : 51 / 13
+  data fill h_d   : 5.0000e-02
+  coll fill h_r   : 2.5000e-02
+bank              : cells 2..4, 284909 parameters
+estimator         : EPIBE (Algorithm 2), N_EBM=1000, beta=1
+residual supports (Assumption 3):
+ cell |      rho_k |     B_E |        L_E |  nodes |    spacing |  |1-int p|
+----------------------------------------------------------------------------
+    2 |        1.2 |      12 |      14.18 |   1024 |    0.00234 |   0.00e+00
+09:49:44 | INFO    | train_pibe         | disturbance observability  (sigma = 0.05, N = 201)
+  i |       gain |    settled |  signature |     SNR |  eff SNR |
+----------------------------------------------------------------------------
+  1 |  1.472e-01 |  1.395e-01 |  2.511e-02 |    0.50 |     7.12 |  <- below the noise floor
+  2 |  1.369e-01 |  1.401e-01 |  2.522e-02 |    0.50 |     7.15 |  <- below the noise floor
+  3 |  4.558e-02 |  3.413e-02 |  4.096e-03 |    0.08 |     1.16 |  <- below the noise floor
+
+basis function 3 leaves a trace 0.08x the noise; it is not
+recoverable pointwise. Reduce sigma, lower the basis frequency, lengthen the
+horizon, or reduce q -- training cannot help.
+09:49:44 | INFO    | pibe.training.trainer | cell 2/4: 3000 local iterations then 3000 fine-tuning iterations
+09:49:44 | INFO    | pibe.training.trainer |   cell 2 | i=    0 | warmup | obj=4.0931e-01 | data=1.5077e-01 | phys=2.5854e-01 | |g|=7.78e+00
+09:50:01 | INFO    | pibe.training.trainer |   cell 2 | i=  500 | warmup | obj=3.1470e-03 | data=3.0213e-03 | phys=1.2570e-04 | |g|=1.03e-01
+09:50:17 | INFO    | pibe.training.trainer |   cell 2 | i= 1000 | fit    | obj=2.6641e+02 | data=2.6641e+02 | phys=2.0663e-04 | |g|=7.61e+00
+09:50:34 | INFO    | pibe.training.trainer |   cell 2 | i= 1500 | fit    | obj=2.5974e+02 | data=2.5974e+02 | phys=2.1360e-04 | |g|=5.74e+00
+09:50:53 | INFO    | pibe.training.trainer |   cell 2 | i= 2000 | local  | obj=-9.8260e-01 | data=-9.9488e-01 | phys=1.2281e-02 | |g|=3.97e+01
+09:51:14 | INFO    | pibe.training.trainer |   cell 2 | i= 2500 | local  | obj=-1.4609e+00 | data=-1.4624e+00 | phys=1.4913e-03 | |g|=2.39e+01
