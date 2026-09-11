@@ -344,6 +344,62 @@ Total 50 000 iterations for the final cell, 20 000 each for cells 2 and 3 —
 | `corr(â, a)` | 0.999, 1.000, 0.997 |
 | shrinkage slope | 0.967, 0.967, 0.881 |
 
+### Scale-normalized percentage errors (Section 5)
+
+$$
+E_{x_j} = \frac{100}{s_{x_j}}\Bigl(\tfrac{1}{P_{te}}\textstyle\sum_\ell
+          \|\hat{\mathbf X}^\ell_j - \mathbf X^\ell_j\|^2_{N,2}\Bigr)^{1/2},
+\quad
+E_{\theta_j} = \frac{100}{s_{\theta_j}}\Bigl(\tfrac{1}{P_{te}}\textstyle\sum_\ell
+          |\hat\theta^\ell_j - \theta^\ell_j|^2\Bigr)^{1/2},
+\quad
+E_d = \frac{100}{G_q s_a}\Bigl(\tfrac{1}{P_{te}}\textstyle\sum_\ell
+          \|\hat{\mathbf d}^\ell - \mathbf d^\ell\|^2_{N,2}\Bigr)^{1/2}
+$$
+
+| `E_x₁` | `E_x₂` | `E_x₃` | `E_θ₁` | `E_θ₂` | `E_d` |
+|---|---|---|---|---|---|
+| **0.0715 %** | **2.1662 %** | **3.4126 %** | **2.6399 %** | **2.3177 %** | **2.0648 %** |
+
+`P_te = 410`, `N = 201`. Constants used:
+
+| quantity | value | source |
+|---|---|---|
+| `s_x` | `[2.5, 0.8, 0.8]` | half-widths of `𝒳_j` |
+| `s_θ` | `[0.4, 0.4]` | half-widths of `Θ_j` |
+| `s_a` | `0.281425` | `‖(0.18, 0.18, 0.12)‖₂` — see below |
+| `G_q` | `1.414214` | `sup_t ‖Γ_q(t)‖₂ = √2`, Eq. (73) |
+| `G_q · s_a` | `0.397995` | the scale in Eq. (118) |
+
+Three points on how these are computed, each differing from what
+`pibe/eval/metrics.py` reports:
+
+- **Root mean square across trajectories, not a mean of norms.** The norm is
+  squared *inside* the trajectory average, so with Eq. (60)'s `‖·‖_{N,2}` each
+  figure is the plain RMS error over every sample of every test trajectory. Bad
+  trajectories weigh more than they would in a mean.
+- **Normalized by reference scale, not by signal magnitude.** These are
+  percentages of the *admissible set*, which is what Corollary 2's componentwise
+  bounds (114)–(118) are stated against. A coordinate that happens to be small
+  on a trajectory does not inflate its own figure.
+- **`E_d` is measured against `G_q s_a`**, from Eq. (118)
+  `‖d̂ − d‖_∞ ≤ ε_{d,q} + G_q s_a B_{n+1}` — the largest disturbance the
+  admissible coefficient box can produce.
+
+> [!note] The choice of `s_a`
+> Section 4.1 asks for `s_y, s_{x_j}, s_{θ_j}, s_a` to be *fixed* without
+> prescribing them, and `s_a` is not in the code. Since this implementation
+> takes `s_{x_j}` and `s_{θ_j}` as admissible half-widths, `s_a` is taken as the
+> 2-norm of the coefficient box's half-widths — the radius of the smallest ball
+> containing `𝒜`. It scales `E_d` directly, so it is reported alongside.
+> `scripts/report_errors.py --run <dir>` recomputes all of it.
+
+Reading them: `x₁` is recovered to **0.07% of its admissible range**, the two
+unmeasured coordinates to 2.2% and 3.4%, both parameters to ~2.5%, and the
+disturbance to 2.1% of the largest amplitude the basis box permits. The ordering
+`E_x₁ ≪ E_x₂ < E_x₃` is the expected error growth down the chain
+(Proposition 4 / Remark 12).
+
 Figures in `outputs/big_w10_v2_s1/figures/`: `states.png`, `disturbance.png`,
 `parameters.png`, `errors.png`, plus `trajectories.png` (10 random held-out
 trajectories) and `coefficient_errors.png` (error vs true value, KDE).
@@ -366,6 +422,7 @@ python scripts/train_pibe.py --config configs/automatica_n3v2_big_lowomega_v2.ya
 python scripts/compare_runs.py     --runs outputs/big_*_v2_s*
 python scripts/plot_trajectories.py --run outputs/big_w10_v2_s1 --count 10
 python scripts/coefficient_errors.py --run outputs/big_w10_v2_s1
+python scripts/report_errors.py      --run outputs/big_w10_v2_s1   # Section 5 percentages
 python scripts/inspect_state.py     --run outputs/big_w10_v2_s1 --metrics
 
 # cluster
