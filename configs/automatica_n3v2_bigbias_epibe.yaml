@@ -1,0 +1,120 @@
+# Large sensor offset: the regime where EPIBE should beat PIBE.
+#
+# Reasoning, not hope.  PIBE's quadratic data term absorbs the whole offset --
+# measured, +0.0497 of a +0.0500 bias -- so its error grows *linearly* with the
+# bias.  EPIBE's failure mode is a bounded drift of the learned density, so its
+# error does not.  The two must cross once the offset is large enough.
+#
+# Where?  The physics identifies a constant offset c with cost ~2.71e-3 * c^2
+# (scripts/location_coercivity.py measured a clean quadratic well).  Against the
+# trained estimator's own physics residual floor of ~1e-4:
+#
+#     bias 0.05 -> signal 0.07x the floor   (invisible: every earlier attempt)
+#     bias 0.15 -> 0.61x
+#     bias 0.30 -> 2.44x                    (above the floor)
+#     bias 0.50 -> 6.77x
+#
+# So the offset only becomes findable during training past bias ~0.3, and that
+# is the honest explanation for why EPIBE lost at bias 0.05.
+#
+# Two settings matter here and both were implemented but never tested in a full
+# run:
+#
+#   ebm.centered_warmup: true
+#       Remark 5's warm-up uses the quadratic objective, which *is* the
+#       zero-mean assumption, so EPIBE has been starting from exactly PIBE's
+#       biased answer.  Proposition 1 gives the fix in closed form: minimising
+#       R_D over the unknown location leaves the residual's variance, so
+#       training on that fixes the shape without committing to the location and
+#       leaves it to the physics -- which is the division of labour
+#       Proposition 1 prescribes.
+#
+#   ebm.radius: 1.2
+#       Must contain residuals up to bias + 3*sigma with slack.
+#
+# The EBM stays UNCONSTRAINED (not symmetric): representing a nonzero mean is
+# the whole point here, and Eq. (54) is what reports it.
+
+system:
+  name: automatica_n3v2
+  kwargs:
+    theta_seed: 0
+data:
+  n_trajectories: 64
+  n_samples: 201
+  horizon: 20.0
+  substeps: 8
+  noise_sigma: 0.05
+  noise_truncation_sigmas: 3.0
+  noise_family: gaussian
+  noise_bias: 0.05
+  noise_bias_relative: false
+  train_fraction: 0.8
+  sample_disturbance_per_trajectory: false
+  sample_theta_per_trajectory: false
+  seed: 1
+basis:
+  kind: fourier
+  q: 3
+  omega: 1.2566370614359172
+  coeff_lo:
+  - -0.18
+  - -0.18
+  - -0.12
+  coeff_hi:
+  - 0.18
+  - 0.18
+  - 0.12
+  remainder_amplitude: 0.0
+architecture:
+  latent_dim: 32
+  encoder_hidden:
+  - 128
+  - 128
+  decoder_hidden:
+  - 64
+  - 64
+  - 64
+  head_hidden:
+  - 64
+  - 64
+  activation: tanh
+  time_fourier_features: 10
+  time_feature_scaling: true
+training:
+  n_total: 6000
+  n_par: 3000
+  lam: 1.0
+  n_collocation: 401
+  batch_size: 16
+  lr_local: 0.001
+  lr_global: 0.0005
+  grad_clip: 1.0
+  log_every: 500
+  seed: 0
+  lr_schedule: cosine
+  final_global_iters: 10000
+  checkpoint_every: 2000
+ebm:
+  enabled: true
+  beta: 1.0
+  hidden:
+  - 64
+  - 64
+  energy_bound: 12.0
+  spectral_norm: false
+  weight_bound: 10.0
+  panels: 64
+  nodes_per_panel: 16
+  radius: 1.2
+  cells:
+  - 2
+  n_ebm: 1000
+  n_fit: 800
+  lr_ebm: 0.002
+  centered_warmup: true
+  symmetric: false
+device: auto
+dtype: float64
+seed: 0
+output_dir: outputs/n3v2_bigbias_epibe
