@@ -8,7 +8,7 @@ loss-design failure.
 
 Usage::
 
-    python scripts/export_results.py --run outputs/cmp_local --out results.json
+    python scripts/export_results.py --run outputs/big_w10_v2_s1 --out results.json
 """
 
 from __future__ import annotations

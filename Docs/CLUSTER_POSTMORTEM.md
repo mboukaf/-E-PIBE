@@ -1,6 +1,6 @@
 # Postmortem: the first big cluster run collapsed
 
-`outputs/big_w10_s0`, Margaret, ~24 h wall, killed at the limit having reached
+`outputs/big_w10_s0` (checkpoint removed in V1.0; its config and training log are preserved under `outputs/_evidence/`), Margaret, ~24 h wall, killed at the limit having reached
 21% of its final cell. The estimates were unusable: state errors of 0.76–0.87
 against the ~1e-2 the same system reaches locally.
 
