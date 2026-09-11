@@ -141,12 +141,67 @@ def test_every_family_is_calibrated_and_compactly_supported(family: str) -> None
     assert float(sample.abs().max()) <= noise.bound
 
 
-@pytest.mark.parametrize("family", sorted(NOISE_FAMILIES))
-def test_every_family_is_zero_mean(family: str) -> None:
+#: Every family is zero-mean except the asymmetric mixture, which exists
+#: precisely to violate that.  Listed by exclusion rather than by enumeration so
+#: a family added later is asserted zero-mean unless it opts out here.
+NON_ZERO_MEAN_FAMILIES = {"mixture"}
+
+
+@pytest.mark.parametrize("family",
+                         sorted(set(NOISE_FAMILIES) - NON_ZERO_MEAN_FAMILIES))
+def test_every_symmetric_family_is_zero_mean(family: str) -> None:
     """Proposition 1's premise: no systematic term in the quadratic data loss."""
     noise = build_noise_model(family, 0.1)
     sample = noise.sample((400_000,), generator=make_generator(1))
     assert abs(float(sample.mean())) < 2e-3
+    assert noise.mean == pytest.approx(0.0, abs=1e-12)
+
+
+@pytest.mark.parametrize("family", sorted(NOISE_FAMILIES))
+def test_stated_mean_matches_the_draws(family: str) -> None:
+    """The ``mean`` property is the law's own, not a Monte-Carlo estimate of it.
+
+    Worth asserting separately from zero-meanness: a caller decides whether
+    Proposition 1 applies by reading this property, so it has to agree with what
+    the sampler actually produces --- for the mixture too, where it is nonzero.
+    """
+    noise = build_noise_model(family, 0.1)
+    sample = noise.sample((400_000,), generator=make_generator(1))
+    assert float(sample.mean()) == pytest.approx(noise.mean, abs=3e-3)
+
+
+def test_mixture_mean_is_structural_not_additive() -> None:
+    r"""The mixture's mean comes from its own asymmetry, not from an offset.
+
+    Three things separate it from :class:`BiasedNoise`, and all three matter for
+    what it is used to demonstrate: the mean is nonzero, it survives at a
+    matched :math:`\sigma`, and it scales with the mixture's own parameters
+    rather than with an added constant.  A symmetric law plus a bias reproduces
+    the first two but not the third.
+    """
+    noise = build_noise_model("mixture", 0.1)
+    sample = noise.sample((400_000,), generator=make_generator(4))
+    assert noise.mean > 0.02                                   # genuinely off zero
+    assert float(sample.std(unbiased=False)) == pytest.approx(0.1, rel=2e-2)
+    assert float(sample.mean()) == pytest.approx(noise.mean, abs=3e-3)
+
+    # Heavier weight on the displaced component moves the mean, at fixed sigma.
+    heavier = build_noise_model("mixture", 0.1, weight=0.5)
+    assert heavier.mean > noise.mean
+
+    # Flipping the displacement flips the sign of the mean.  Only to quadrature
+    # accuracy: the midpoint grid that calibrates the moments is not exactly
+    # antisymmetric under the flip, which leaves a relative residue of ~1e-5.
+    below = build_noise_model("mixture", 0.1, separation=-2.5)
+    assert below.mean == pytest.approx(-noise.mean, rel=1e-4)
+
+    # And it is bimodal, so not a shifted Gaussian: the density between the
+    # modes is lower than at either of them.
+    hist = torch.histc(sample, bins=60, min=float(sample.min()),
+                       max=float(sample.max()))
+    peak = int(hist.argmax())
+    far = hist[peak + 12:] if peak < 30 else hist[:peak - 12]
+    assert float(far.max()) > 0.0
 
 
 def test_families_differ_in_shape_at_matched_variance() -> None:
