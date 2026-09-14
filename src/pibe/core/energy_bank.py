@@ -170,6 +170,12 @@ class EnergyEstimatorBank(EstimatorBank):
             "residual_mean", torch.zeros((), dtype=dtype),
             persistent=self.ebm_config.location == "profiled",
         )
+        # The sensor offset selected by the amortized location search; the
+        # bank sees y - location at inference.
+        self.register_buffer(
+            "location", torch.zeros((), dtype=dtype),
+            persistent=self.ebm_config.location == "amortized",
+        )
 
     # ------------------------------------------------------------------
     # structure
@@ -246,6 +252,53 @@ class EnergyEstimatorBank(EstimatorBank):
             )
         return outputs
 
+    @torch.no_grad()
+    def estimate(self, y: Tensor, t_data: Tensor, t_coll: Tensor, offset: float | None = None):
+        """The inherited readout of ``y - offset``; the stored location when ``offset`` is None."""
+        shift = self.location if offset is None else offset
+        return super().estimate(y - shift, t_data, t_coll)
+
+    # ------------------------------------------------------------------
+    # amortized location search
+    # ------------------------------------------------------------------
+
+    def chain_cost(self, y: Tensor, t_data: Tensor, t_coll: Tensor, lam: float) -> float:
+        r"""Every term of :math:`\mathcal{L}^{n+1}_{Tot}` except the first cell's data term.
+
+        That term is fitted at every candidate offset alike, so it carries no
+        information about the location; what is left is the physics of every
+        cell and the downstream consistency penalties, weighted as in Eq. (27).
+        Always scored on PIBE's quadratic consistency terms.
+        """
+        from pibe.core.losses import global_weights
+
+        was_training, was_energy = self.training, self.use_energy
+        self.eval()
+        self.use_energy = False
+        try:
+            with torch.enable_grad():
+                outputs = self.forward(self.final_index, y, t_data, t_coll,
+                                       mode=Mode.GLOBAL, create_graph=False)
+                weights = global_weights(self.final_index)
+                total = 0.0
+                for k in self.cell_indices:
+                    loss = super().cell_loss(k, y, t_coll, outputs, lam)
+                    total += weights[k] * (
+                        lam * float(loss.physics) + (0.0 if k == 2 else float(loss.data))
+                    )
+        finally:
+            self.train(was_training)
+            self.use_energy = was_energy
+        return total
+
+    def offset_profile(self, y: Tensor, t_data: Tensor, t_coll: Tensor, lam: float,
+                       offsets: Tensor) -> Tensor:
+        """:meth:`chain_cost` of ``y - c`` for every candidate offset ``c``."""
+        return torch.tensor(
+            [self.chain_cost(y - float(c), t_data, t_coll, lam) for c in offsets],
+            dtype=y.dtype,
+        )
+
     # ------------------------------------------------------------------
     # residuals and losses
     # ------------------------------------------------------------------
@@ -314,7 +367,7 @@ class EnergyEstimatorBank(EstimatorBank):
                 if self.training:
                     with torch.no_grad():
                         self.residual_mean.mul_(0.99).add_(0.01 * residual.mean())
-                if self.ebm_config.location == "profiled":
+                if self.ebm_config.location in ("profiled", "amortized"):
                     residual = residual - residual.mean()
             data = model.negative_log_likelihood(residual)
             if cell_index == 2 and self.ebm_config.nll_scale == "variance":
@@ -364,6 +417,9 @@ class EnergyEstimatorBank(EstimatorBank):
             # The density was fitted to centred residuals; the location lives
             # in the residual mean instead.
             mean += float(self.residual_mean)
+        elif self.ebm_config.location == "amortized":
+            # The density was refitted to y - location - x_hat_1.
+            mean += float(self.location)
         return mean
 
     @torch.no_grad()

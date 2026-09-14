@@ -25,6 +25,13 @@ that on its own fair test — heavy-tailed zero-mean noise, the case a learned
 likelihood is classically for — it is 8x–22x *worse* than the quadratic term it
 replaces.
 
+**Update, §10 (large bias).** Two further findings. On n3v2 a sensor offset is
+not identifiable by *any* estimator: θ₂ acts as a constant input and absorbs it.
+On a one-term variant where it is identifiable (`automatica_n3v2_biasid`), EPIBE
+with an amortized, simulation-searched location (`ebm.location: amortized`)
+recovers the offset (0.470 of 0.5, 0.958 of 1.0, −0.03 of 0) and beats PIBE by
+13–21× on x₁; at bias 0.5 it matches or beats PIBE on every quantity to within 5%.
+
 ---
 
 ## 1. What was built
@@ -458,4 +465,202 @@ python scripts/offset_by_shooting.py --config configs/automatica_n3v2_epibe_cell
     --trajectories 4 --steps 6000 --window 151
 python scripts/train_pibe.py --config configs/automatica_n3v2_biased_pibe.yaml \
     --set data.noise_bias=0.00712 --output-dir outputs/n3v2_corrected_pibe
+```
+---
+
+## 10. A large sensor bias: when EPIBE can beat PIBE, and how
+
+§8 fixed the biased sensor by estimating the offset outside the bank. This
+section asks the harder question — can EPIBE *itself* beat PIBE once the bias is
+large enough to wreck PIBE — and answers it in three steps: on n3v2 no
+estimator can, on a one-term variant every estimator could, and there the
+energy-based bank does once its location is searched rather than descended.
+
+### 10.1 On n3v2 the offset is not identifiable at all
+
+Profile the physics along a constant offset `c` of `x̂₁`, rebuilding `x̂₂, x̂₃`
+from the triangular form and refitting `θ̂, â` (four trajectories of the
+dataset; `scripts/location_coercivity.py` reproduces the picture on one synthetic
+trajectory):
+
+| offset 0.5, what is refitted | min ‖r‖² |
+|---|---|
+| nothing (θ held at truth) | **4.3e-01** |
+| θ₂ only | **7.4e-05** |
+| θ₁ only | 2.0e-02 (θ₁ hits its box) |
+
+After the transient `x₂ ≈ 0`, so `θ₂(1.2 + 0.6 cos 2x₂)` is a *constant input*,
+and a constant input and a constant output offset are indistinguishable at
+steady state. The fit slides along `θ̂₂ ≈ θ₂ + 0.29c` at almost no cost — exactly
+the θ₂ error PIBE reports at bias 0.5 (0.136). Neither a slower nor a larger
+disturbance helps: `x₂` is not excited after the transient at any tested
+frequency/amplitude, and a smooth function of `x₁(t)` driven at the basis
+frequency lies mostly in the span of the basis.
+
+Scanning the offset through a trained bank (fine-tune at a fixed shift, then score
+every term but the first cell's data term) confirms it end to end:
+
+| fixed offset | 0 | 0.25 | **0.5 (true)** | 0.75 | 1.0 |
+|---|---|---|---|---|---|
+| chain cost | 1.70e-5 | **1.66e-5** | 1.88e-5 | 2.45e-5 | 3.09e-5 |
+
+The truth is not preferred — yet the bank fine-tuned *at* the true offset gives
+x errors [0.008, 0.028, 0.030] against PIBE's [0.50, 0.11, 0.21]. The information
+is not in the data. **No EPIBE configuration can beat PIBE on this benchmark**,
+and neither can any other estimator; this is a property of the system.
+
+### 10.2 A benchmark on which the offset is identifiable
+
+`automatica_n3v2_biasid` adds one term to the last equation, `+0.5 sin 3x₁`.
+`∂f₃/∂x₁` then moves from −1.87 to +0.1 over half a unit around the operating
+point, so an offset changes the local gain, which no constant parameter shift
+can imitate. Same profile, θ searched on [−1, 1]² so the box cannot be what
+identifies it:
+
+| offset c | n3v2 | biasid |
+|---|---|---|
+| 0.10 | ~2e-6 | 6.8e-04 |
+| 0.25 | 1.7e-05 | 3.5e-03 |
+| 0.50 | 3.8e-05 | 1.7e-02 |
+
+with a unique minimum at `c = 0` over [−1, 1.5]; it survives dropping the first
+5 s (4.3e-3 at 0.5), so it is not only the transient. PIBE still breaks there:
+bias 0.5 gives x₁ error 0.50 and θ₂ error 0.13 against 0.01 and 0.06 unbiased.
+
+(`architecture.saturation_limit: 4.0` is required on this config: without it
+θ₁'s head pinned to its box in both the unbiased PIBE run and the EPIBE run.)
+
+### 10.3 Descending the location does not work, even when it is identifiable
+
+With the first cell's likelihood made location-free (`ebm.location: profiled`,
+the residual centred before the energy sees it) the physics alone decides the
+location. Warm-started from the biased PIBE bank, gradient descent moves it the
+right way — but slowly, and it stalls:
+
+| variant | μ̂ after | x₁ |
+|---|---|---|
+| λ=1, 6k steps | +0.25 | 0.25 |
+| λ=1, 30k steps (stopped at 10k) | +0.23 | 0.27 |
+| consistency ×10, 8k steps | +0.26 | 0.24 |
+| λ=10 / λ=30 / constant lr | diverged or wrong direction | — |
+| full EPIBE, 40k final-cell steps | +0.34 | 0.16 |
+
+The reason is structural. Every cell's new coordinate can satisfy its own
+equation exactly, so the last equation reaches the objective only through the
+consistency penalty between two reconstructions of `x₃`, filtered by the stable
+dynamics `1/(s + 2.7)`. A wrong offset is hidden at a chain cost of 1.2e-4
+against 7.8e-5 at the truth — a ratio of 1.5 where the exact profile gives two
+orders of magnitude. An explicit scalar offset parameter does not help (it barely
+moves); neither does a larger λ.
+
+### 10.4 What works: amortize the offset, search it by simulation
+
+The degeneracy is one scalar, so it can be searched rather than descended — and
+the bank can be taught to answer for every candidate at once.
+
+1. **Algorithm 2** as usual (first cell location-profiled).
+2. **Amortization.** An extra end-to-end stage feeds every trajectory
+   `y − μ̃` with its own `μ̃ ~ U(prior window)`, first cell on the *anchored*
+   quadratic term. The bank then returns the full chain for any assumed offset.
+3. **Location by simulation.** For each candidate `μ`, the bank's
+   `(x̂₀, θ̂, â)` at `y − μ` initialise a shooting fit of the true ODE to `y − μ`
+   (θ shared, x₀ and a per trajectory); the refined misfit `J(μ)` is scored. A
+   coarse grid (150 steps per point) finds the basin, 5 points over ±one step
+   refined to convergence (600 steps) give the vertex of a least-squares
+   quadratic.
+4. **Re-centre.** Re-amortize on a window of the same width centred on the
+   estimate and rerun the fine pass.
+5. **Density.** Refit the first cell's EBM to `y − μ̂ − x̂₁`; Eq. (54) reports
+   `μ̂ + E_p[ξ]`.
+
+`ebm.location: amortized` with `offset_window`, `offset_grid`, `offset_steps`,
+`offset_fine`, `offset_fine_steps`, `amortize_iters`, `recenter_iters`,
+`offset_refit`; the search is `pibe.eval.offset_shooting.select_offset`.
+
+Every design choice above was forced by a failure:
+
+| tried | result |
+|---|---|
+| offsets drawn from the first iteration | heads pinned, θ₂ error 0.38, every location wrong |
+| location-free (centred) term during amortization | reconstruction slides, `y − μ` no longer maps to offset `μ` |
+| score candidates by the bank's own chain cost | bowl centred on the window (accuracy, not physics); b=0 → 0.10, wide window → −0.25 |
+| score by simulation with the bank's estimates, no refit | flat (argmin 0.55 at b=0.5) |
+| refined shooting, 150 steps, 3-point parabola | biased low: 0.46 at 0.5, 0.89 at 1.0 |
+| fine-tune at the selected offset | *worse* x₂, x₃, θ — the spread of offsets regularizes |
+| narrow (±0.25) re-amortization | helps b=1, hurts b=0 and b=0.5 |
+| **same-width re-centred re-amortization** | robust at the window edge without losing the interior |
+
+Why simulation: a simulated trajectory is generated by the model from
+`(x₀, θ, a)`; none of the decoder slack of §10.3 is available to it, so `J(μ)`
+is the exact physics profile on the measured data and bottoms out at the noise
+variance at the true offset.
+
+### 10.5 Results
+
+`automatica_n3v2_biasid`, σ = 0.05, 64 trajectories, held-out errors. EPIBE is
+the end-to-end pipeline of §10.4 (prior window [−0.25, 1.25]); every number
+below comes from one training run, no post-hoc selection.
+
+| bias | run | x₁ | x₂ | x₃ | \|θ₁\| | \|θ₂\| | d | μ̂_ω |
+|---|---|---|---|---|---|---|---|---|
+| 0 | PIBE | **1.1e-2** | 1.07e-1 | 9.1e-2 | 6.5e-2 | 6.1e-2 | **2.6e-2** | — |
+| 0 | EPIBE, amortized | 3.7e-2 | **7.7e-2** | **8.2e-2** | **3.6e-2** | **4.9e-2** | 7.1e-2 | −0.032 |
+| 0.5 | PIBE | 4.99e-1 | **8.5e-2** | 2.31e-1 | 4.9e-2 | 1.35e-1 | 6.3e-2 | — |
+| 0.5 | EPIBE, free location | 3.73e-1 | 2.28e-1 | 3.42e-1 | 9.9e-2 | 2.29e-1 | 7.6e-2 | +0.126 |
+| 0.5 | EPIBE, amortized | **3.7e-2** | 8.8e-2 | **9.1e-2** | **4.5e-2** | **5.9e-2** | 6.5e-2 | **+0.470** |
+| 1.0 | PIBE | 9.97e-1 | **8.4e-2** | 1.87e-1 | 1.62e-1 | **1.00e-1** | 8.5e-2 | — |
+| 1.0 | EPIBE, amortized | **4.8e-2** | 1.62e-1 | **1.55e-1** | **9.3e-2** | 1.08e-1 | **6.8e-2** | **+0.958** |
+
+* **The bias is recovered**: 0.470 of 0.5 and 0.958 of 1.0, and no bias is
+  invented on clean data (−0.032). The refitted density has sd 0.051–0.052
+  against a true 0.049.
+* **Bias 0.5**: x₁ 13× better, x₃ 2.5×, θ₂ 2.3×, θ₁ slightly better; x₂ and d
+  within 5%. On x₂, x₃ and θ it also matches or beats the *unbiased* PIBE run.
+* **Bias 1.0**: x₁ 21× better, θ₁ 1.7×, x₃ and d better, θ₂ level; x₂ is 1.9×
+  worse. This is the one quantity EPIBE loses, and the offset residual of
+  0.042 is its likely cause: `x̂₂` inherits the offset's slope through
+  `f₁(x₁ + c)`.
+* **Unbiased**: the amortized bank is better than PIBE on x₂, x₃ and θ (the
+  spread of offsets regularizes it) and worse on x₁ and d; the 0.032 offset
+  error accounts for most of the x₁ difference.
+
+The remaining error is dominated by the location: at the exact offset the banks
+(before re-centring) give x₁ ≈ 0.02. Within the method, `offset_fine_steps` is the knob — at 150
+steps the search was biased by 0.04–0.10, at 600 by 0.03–0.04.
+
+### 10.6 What this says about EPIBE
+
+1. **The energy term does not identify the offset; the physics does**, and only
+   if the offset is not absorbable by a parameter. Whether it is can be checked
+   before any training with the offset profile of §10.1/10.2; on the
+   automatica_n3 family it is not, because each θ enters as a near-constant
+   input.
+2. **Even when identifiable, the collocation objective cannot descend to it.**
+   The soft consistency coupling hides the offset at a cost comparable to the
+   networks' own error. This is the conditioning statement of §5b, made on a
+   system where the information is genuinely present.
+3. **Searching one scalar in integrated form works.** Amortize the bank over the
+   offset, score candidates by a simulation fit started from the bank, and the
+   location is found to a few hundredths; the bank then gives estimates at that
+   offset that match or beat PIBE everywhere at bias 0.5.
+4. **The EBM's contribution is the shape**, reported through Eq. (54) with the
+   searched location — the division of labour §8 already suggested, now inside
+   one estimator.
+
+### Reproducing §10
+
+```bash
+# identifiability profile (n3v2 vs biasid)
+python scripts/location_coercivity.py --config configs/automatica_n3v2_biasid_b05.yaml
+
+# PIBE baselines
+python scripts/train_pibe.py --config configs/automatica_n3v2_biasid_b05.yaml \
+    --set ebm.enabled=false data.noise_bias=0.5 --output-dir outputs/biasid_pibe_b0.5
+
+# EPIBE with the amortized location (bias 0.5; set data.noise_bias for 0 / 1.0)
+python scripts/train_pibe.py --config configs/automatica_n3v2_biasid_b05.yaml --set \
+    ebm.location=amortized ebm.nll_scale=variance ebm.centered_warmup=false \
+    "ebm.offset_window=[-0.25,1.25]" ebm.offset_grid=13 ebm.offset_steps=150 \
+    ebm.offset_fine=5 ebm.offset_fine_steps=600 ebm.amortize_iters=12000 \
+    ebm.recenter_iters=6000 --output-dir outputs/biasid_epibe_b0.5
 ```

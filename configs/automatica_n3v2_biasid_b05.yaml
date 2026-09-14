@@ -44,6 +44,7 @@ architecture:
   activation: tanh
   time_fourier_features: 10
   time_feature_scaling: true
+  saturation_limit: 4.0
 training:
   n_total: 6000
   n_par: 3000

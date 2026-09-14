@@ -413,6 +413,43 @@ class EBMConfig:
         invariant to a common shift of :math:`\hat x^2_1`, and the location is
         left to the physics with no lagging density opposing it.
         :math:`\hat\mu_\omega` becomes that mean plus the density's own mean.
+        ``"amortized"`` goes one step further: after Algorithm 2 (run with the
+        profiled term), an extra end-to-end stage feeds every trajectory
+        :math:`y - \tilde\mu` for an offset drawn uniformly from
+        :attr:`offset_window`, so one bank learns the best chain for *every*
+        candidate sensor offset.  After training the location is chosen by
+        profiling the physics and consistency cost over that window on the
+        training data --- a one-dimensional search over forward passes --- and
+        stored in the bank, which subtracts it at inference.
+    offset_window
+        ``[lo, hi]``, the prior range of the sensor offset for ``"amortized"``.
+    offset_grid
+        Number of candidate offsets in the profile; the minimizer is refined by
+        a parabola through its neighbours.
+    offset_score
+        How a candidate offset is scored.  ``"shooting"`` (default) refines the
+        bank's :math:`(\hat x_0, \hat\theta, \hat a)` by fitting a simulated
+        output to :math:`y - \mu` and scores the misfit; ``"chain"`` scores the
+        bank's own physics and consistency terms, which is cheaper but mixes
+        the physics with the network's accuracy near each offset.  See
+        :mod:`pibe.eval.offset_shooting`.
+    offset_steps
+        Refinement steps per coarse candidate for ``"shooting"``.
+    offset_fine, offset_fine_steps
+        Second pass: this many offsets spanning one coarse step either side of
+        the coarse minimizer, each refined for ``offset_fine_steps``; the offset
+        is the vertex of a least-squares quadratic through them.  ``0`` keeps
+        the coarse minimizer.
+    amortize_iters
+        End-to-end iterations on randomly offset measurements, run after
+        Algorithm 2 and before the location search.
+    recenter_iters
+        After the first search, re-amortize for this many iterations on a window
+        of the same width centred on the estimate, then rerun the fine search.
+        ``0`` skips it.
+    offset_refit
+        EBM-only iterations fitting the first cell's density to the residual at
+        the selected offset, so Eq. (54) reports the full location.
     offset_parameter
         Add one scalar, shared by every trajectory, to :math:`\hat x^2_1`, and
         train it in the end-to-end phases only.  The degenerate direction is
@@ -449,6 +486,15 @@ class EBMConfig:
     offset_parameter: bool = False
     lr_offset: float | None = None
     nll_scale: str = "none"
+    offset_window: list[float] = field(default_factory=lambda: [-1.0, 1.0])
+    offset_grid: int = 11
+    offset_score: str = "shooting"
+    offset_steps: int = 150
+    offset_fine: int = 5
+    offset_fine_steps: int = 600
+    amortize_iters: int = 10000
+    recenter_iters: int = 6000
+    offset_refit: int = 1000
 
     def __post_init__(self) -> None:
         # YAML gives lists; the dataclass stores hashable tuples, as
@@ -465,8 +511,16 @@ class EBMConfig:
             raise ValueError("the quadrature needs at least two nodes")
         if self.n_fit < 0:
             raise ValueError(f"n_fit must be non-negative, got {self.n_fit}")
-        if self.location not in ("free", "profiled"):
-            raise ValueError(f"location must be 'free' or 'profiled', got {self.location!r}")
+        if self.location not in ("free", "profiled", "amortized"):
+            raise ValueError(
+                f"location must be 'free', 'profiled' or 'amortized', got {self.location!r}"
+            )
+        if len(self.offset_window) != 2 or self.offset_window[0] >= self.offset_window[1]:
+            raise ValueError(f"offset_window must be [lo, hi] with lo < hi, got {self.offset_window}")
+        if self.offset_score not in ("shooting", "chain"):
+            raise ValueError(f"offset_score must be 'shooting' or 'chain', got {self.offset_score!r}")
+        if self.offset_grid < 3:
+            raise ValueError(f"offset_grid must be at least 3, got {self.offset_grid}")
         if self.nll_scale not in ("none", "variance"):
             raise ValueError(f"nll_scale must be 'none' or 'variance', got {self.nll_scale!r}")
         if not 0 < self.n_ebm < n_par:
