@@ -103,13 +103,16 @@ class EPIBETrainer(PIBETrainer):
             groups.append({"params": pinn, "lr": pinn_lr})
         if ebm:
             groups.append({"params": ebm, "lr": ebm_lr})
-        # The global offset moves only end to end: in a local phase the cell's
-        # own new coordinate absorbs any shift, so there is nothing to learn.
+        # The global offset moves only in the final cell's end-to-end phase.
+        # Upstream of it every cell's new coordinate absorbs a shift of x_hat_1
+        # exactly, so the offset would see nothing but minibatch noise, and
+        # Adam turns a noise-only gradient into a random walk.
         offset = self.bank.offset
         extra: list[torch.nn.Parameter] = []
         if offset is not None:
-            offset.requires_grad_(phase is Phase.GLOBAL)
-            if phase is Phase.GLOBAL:
+            moves = phase is Phase.GLOBAL and cell_index == self.bank.final_index
+            offset.requires_grad_(moves)
+            if moves:
                 lr = self.ebm_config.lr_offset
                 groups.append({"params": [offset],
                                "lr": self.config.lr_global if lr is None else lr})
