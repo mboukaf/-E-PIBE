@@ -103,12 +103,26 @@ class EPIBETrainer(PIBETrainer):
             groups.append({"params": pinn, "lr": pinn_lr})
         if ebm:
             groups.append({"params": ebm, "lr": ebm_lr})
+        # The global offset moves only in the final cell's end-to-end phase.
+        # Upstream of it every cell's new coordinate absorbs a shift of x_hat_1
+        # exactly, so the offset would see nothing but minibatch noise, and
+        # Adam turns a noise-only gradient into a random walk.
+        offset = self.bank.offset
+        extra: list[torch.nn.Parameter] = []
+        if offset is not None:
+            moves = phase is Phase.GLOBAL and cell_index == self.bank.final_index
+            offset.requires_grad_(moves)
+            if moves:
+                lr = self.ebm_config.lr_offset
+                groups.append({"params": [offset],
+                               "lr": self.config.lr_global if lr is None else lr})
+                extra = [offset]
 
         logger.debug(
             "cell %d entering %s: %d PINN tensors, %d EBM tensors, energy=%s",
             cell_index, phase.value, len(pinn), len(ebm), self.bank.use_energy,
         )
-        return pinn + ebm, groups
+        return pinn + ebm + extra, groups
 
     def phase_mode(self, phase: Phase) -> Mode:
         """Warm-up and local both evaluate the bank with upstream detached."""
@@ -121,6 +135,145 @@ class EPIBETrainer(PIBETrainer):
         """Project every EBM update onto :math:`\\mathcal{K}_k` (lines 17, 23)."""
         if phase.uses_energy:
             self.bank.project(self.ebm_config.weight_bound)
+
+    def measurement_for_step(self, y: torch.Tensor) -> torch.Tensor:
+        r"""During the amortization stage, shift each trajectory by its own random offset.
+
+        The bank then learns the chain for every sensor offset in the prior
+        window, not only for the one the data happen to carry, which is what
+        lets :meth:`locate` compare offsets by feeding the bank ``y - mu``.
+        """
+        if not getattr(self, "_amortizing", False):
+            return y
+        lo, hi = self.ebm_config.offset_window
+        unit = torch.rand(y.shape[0], 1, generator=self.generator, dtype=y.dtype)
+        return y - (lo + (hi - lo) * unit).to(y.device)
+
+    def train(self):
+        """Algorithm 2; under the amortized location, then amortization and location search."""
+        history = super().train()
+        cfg = self.ebm_config
+        if cfg.location == "amortized":
+            self.amortize()
+            first = self.locate()
+            if cfg.recenter_iters > 0:
+                # A true offset near the edge of the prior window sits where the
+                # amortized bank is least accurate.  Re-amortize on a window of
+                # the same width centred on the first estimate -- the width is
+                # kept because the spread of offsets itself regularizes the bank
+                # (a narrow window, or a fine-tune at a single offset, measurably
+                # loses accuracy) -- and search again, this time only the fine
+                # pass around the first estimate.
+                half = 0.5 * (cfg.offset_window[1] - cfg.offset_window[0])
+                prior = list(cfg.offset_window)
+                cfg.offset_window = [first - half, first + half]
+                try:
+                    self.amortize(iterations=cfg.recenter_iters)
+                    self.locate(centre=first)
+                finally:
+                    cfg.offset_window = prior
+        return history
+
+    def amortize(self, iterations: int | None = None) -> None:
+        r"""End-to-end fine-tuning on randomly offset measurements.
+
+        Runs after Algorithm 2 has converged, on the final cell's global
+        objective, with every trajectory fed :math:`y - \tilde\mu` for its own
+        :math:`\tilde\mu` drawn from :attr:`~pibe.config.EBMConfig.offset_window`.
+
+        Two choices matter and both were forced by failures.  It starts from a
+        converged bank: drawing offsets from the first iteration leaves the
+        cell-by-cell stages, which cannot identify anything about the location,
+        with a moving target, and the parameter heads end pinned against their
+        boxes.  And the first cell is scored on the quadratic term, not on the
+        location-free likelihood: the point is that feeding ``y - mu`` yields
+        the chain *at* offset ``mu``, so the reconstruction must be anchored to
+        its input rather than left free to slide.
+        """
+        cfg, final = self.ebm_config, self.bank.final_index
+        iterations = cfg.amortize_iters if iterations is None else iterations
+        if iterations <= 0:
+            return
+        logger.info("amortization: %d end-to-end iterations on offsets in [%+.3f, %+.3f]",
+                    iterations, *cfg.offset_window)
+        active, groups = self.enter_phase(final, Phase.GLOBAL)
+        # Only the PINNs move; the densities are refitted after the search.
+        groups = [g for g in groups if not any(p in set(self.bank.ebm_parameters_upto(final)) for p in g["params"])]
+        self.bank.set_ebm_trainable_upto(final, False)
+        if self.bank.offset is not None:
+            self.bank.offset.requires_grad_(False)
+            groups = [g for g in groups if not any(p is self.bank.offset for p in g["params"])]
+        params = [p for g in groups for p in g["params"]]
+        optimizer = torch.optim.Adam(groups, weight_decay=self.config.weight_decay)
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=iterations)
+        self._amortizing = True
+        self.bank.use_energy = False
+        try:
+            for iteration in range(iterations):
+                result = self.step(final, Phase.GLOBAL, optimizer, params)
+                scheduler.step()
+                if self.config.log_every > 0 and (
+                    iteration % self.config.log_every == 0 or iteration == iterations - 1
+                ):
+                    logger.info("  amortize | i=%5d | obj=%.4e | data=%.4e | phys=%.4e | |g|=%.2e",
+                                iteration, result.objective, float(result.target.data),
+                                float(result.target.physics), result.grad_norm)
+        finally:
+            self._amortizing = False
+            self.bank.use_energy = True
+
+    def locate(self, centre: float | None = None) -> float:
+        r"""Select the sensor offset by profiling the physics over the prior window.
+
+        The first cell's data term is fitted equally well at every candidate
+        offset, so the profile is decided by the physics alone.  Each candidate
+        is scored as configured by ``ebm.offset_score`` (see
+        :mod:`pibe.eval.offset_shooting`), the minimizer is found by the
+        two-pass search of :func:`~pibe.eval.offset_shooting.select_offset` and
+        stored as ``bank.location``, and the first
+        cell's density is then refitted to the residual that remains, so that
+        Eq. (54) reports location and shape together.
+        """
+        from pibe.eval.offset_shooting import select_offset
+
+        bank, data, cfg = self.bank, self.train_data, self.ebm_config
+        was_training = bank.training
+        bank.eval()
+        if cfg.offset_score == "shooting":
+            best, _, _ = select_offset(
+                bank, data.y, data.t, self.t_coll, tuple(cfg.offset_window), cfg.offset_grid,
+                coarse_steps=cfg.offset_steps, fine_points=cfg.offset_fine,
+                fine_steps=cfg.offset_fine_steps, log=logger.info, centre=centre,
+            )
+        else:
+            offsets = torch.linspace(cfg.offset_window[0], cfg.offset_window[1],
+                                     cfg.offset_grid, dtype=data.y.dtype)
+            costs = [bank.chain_cost(data.y - float(c), data.t, self.t_coll, self.config.lam)
+                     for c in offsets]
+            for c, cost in zip(offsets.tolist(), costs):
+                logger.info("  offset %+.4f | chain cost %.5e", c, cost)
+            best = float(offsets[int(torch.tensor(costs).argmin())])
+        bank.train(was_training)
+        bank.location.fill_(best)
+        logger.info("selected sensor offset = %+.5f", best)
+
+        if cfg.offset_refit > 0 and 2 in bank.energy_cells:
+            with torch.no_grad():
+                outputs = bank(bank.final_index, data.y - bank.location, data.t, self.t_coll,
+                               mode=Mode.GLOBAL, need_derivative=False)
+                residual = (data.y - bank.location - outputs[2].x_prev_data).reshape(-1)
+            model = bank.ebm(2)
+            bank.set_ebm_trainable(2, True)
+            lr = cfg.lr_ebm if cfg.lr_ebm is not None else self.config.lr_local
+            optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+            for _ in range(cfg.offset_refit):
+                optimizer.zero_grad(set_to_none=True)
+                model.negative_log_likelihood(residual).backward()
+                optimizer.step()
+                model.project(cfg.weight_bound)
+            logger.info("mu_omega_hat = %+.6e after refitting the density at the selected offset",
+                        bank.noise_mean())
+        return best
 
     # ------------------------------------------------------------------
     # the warm-up's physics weight

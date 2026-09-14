@@ -10,26 +10,50 @@ magnitude above :math:`x_2`, so sharing a frame with it would need two y-scales,
 and at the trained noise level it is visually indistinguishable from :math:`x_1`
 anyway.
 
+The two estimates
+-----------------
+By default each panel carries *two* estimates of the same quantity, from the same
+trained model, differing only in what it was fed:
+
+``noise-free`` (orange, dashed)
+    :math:`y = x_1` exactly.  This is the estimator's ceiling --- whatever error
+    remains is approximation error in the decoder and the cell chain, not
+    measurement noise.
+``sigma = X`` (green, dotted)
+    the same held-out trajectory re-measured at the chosen level.  The states,
+    parameters and disturbance coefficients are untouched, so the gap between
+    the two dashed curves is caused by :math:`\omega` and nothing else.
+
+Reading the two together separates the two error sources that a single curve
+conflates.  ``--no-noise-free`` drops back to one estimate per panel.
+
 Print conventions
 -----------------
 Vector PDF alongside the PNG, since journals rasterize anything else badly.
 Serif type at paper size so the figure matches the body text.  No figure title
 --- the caption carries it in LaTeX.
 
-Distinguishable without colour: the truth is solid, the estimate dashed.
-Reviewers print in greyscale, and the blue and orange used here converge to
-similar greys, so the dash pattern rather than the hue is what separates them.
+Distinguishable without colour: solid truth, dashed noise-free estimate, dotted
+noisy estimate.  Reviewers print in greyscale, where the blue and the green
+converge to L = 98 and 103 of 255, so the line style rather than the hue is what
+separates those two.
 
 Colour
 ------
-Slots 1-2 of the validated categorical palette (blue / orange), checked with the
-all-pairs validator as small multiples require: CVD ΔE 12.9, normal-vision
-ΔE 30.9, both clear of their floors, and both above 3:1 against the surface.
+One hue per series --- blue truth, orange noise-free estimate, green noisy
+estimate --- checked with the all-pairs validator, as three curves sharing one
+frame require.  Normal-vision separation is comfortable (worst pair ΔE 19.9);
+the binding constraint is protan vision, where the orange and the green fall to
+ΔE 8.0.  That sits at the floor rather than above it, so the dash patterns are
+not decoration: they are the secondary encoding that the floor requires.  The
+orange also reads at 2.75:1 against white rather than 3:1, relieved by the
+legend.
 
 Usage::
 
-    python scripts/paper_fig_estimates.py --run outputs/big_w10_v2_s1
-    python scripts/paper_fig_estimates.py --sigma 0.05 --trajectory 124
+    python scripts/paper_fig_estimates.py --run outputs/big_w10_v2_s1 --sigma 0.05
+    python scripts/paper_fig_estimates.py --sigma 0.1 --trajectory 124
+    python scripts/paper_fig_estimates.py --no-noise-free          # one estimate
 """
 
 from __future__ import annotations
@@ -49,16 +73,33 @@ import numpy as np  # noqa: E402
 import torch  # noqa: E402
 
 from pibe.config import RunConfig  # noqa: E402
-from pibe.data.noise import build_noise_model  # noqa: E402
+from pibe.data.disturbance import BasisDisturbance  # noqa: E402
+from pibe.data.noise import NOISE_FAMILIES, build_noise_model  # noqa: E402
+from pibe.data.simulate import rk4_integrate  # noqa: E402
 from pibe.experiment import build_experiment  # noqa: E402
 from pibe.training.callbacks import load_checkpoint, resolve_checkpoint  # noqa: E402
 from pibe.utils.logging import setup_logging  # noqa: E402
 from pibe.utils.seeding import make_generator  # noqa: E402
 
-# Validated categorical slots 1-2.  Identity is fixed per entity: the truth is
-# always blue and the estimate always orange, in every figure in this project.
-TRUTH, ESTIMATE = "#2a78d6", "#eb6834"
+# Identity is fixed per series: blue is always the truth, orange always the
+# estimate from a clean measurement, green always the estimate from a noisy one.
+# Validated as a categorical triple -- worst all-pairs normal-vision dE 19.9,
+# worst protan dE 8.0 (orange against green), which is at the floor and so
+# obliges the dash patterns below as secondary encoding.
+TRUTH, ESTIMATE1,ESTIMATE2 = "#2c6ab1", "#ff6c27","#577C4F",
 INK, INK_SOFT = "#0b0b0b", "#52514e"
+# The measurement is the estimator's input, not one of its results.  It is kept
+# pale and hairline-thin so it reads as the scatter the panel is reconstructed
+# from rather than as a fourth series: with ESTIMATE2 currently grey too, weight
+# and lightness are what separate the two, so do not thicken this one.
+MEASURED = "#bdbcb8"
+
+# Dash patterns are load-bearing here, not decoration: in greyscale the blue and
+# the green converge (L 98 against 103 of 255), and in protan vision the orange
+# and the green sit at the separation floor.  Kept far apart on purpose -- a long
+# dash against a fine dot.
+DASH_CLEAN = (0, (4.5, 2.2))
+DASH_NOISY = (0, (1.3, 2.3))
 
 
 def paper_style(base: float, serif: bool) -> None:
@@ -98,21 +139,137 @@ def paper_style(base: float, serif: bool) -> None:
     })
 
 
+def noise_arguments(pairs: list[str]) -> dict:
+    """``["weight=0.4", "separation=3"]`` -> ``{"weight": 0.4, "separation": 3.0}``."""
+    kwargs = {}
+    for item in pairs:
+        if "=" not in item:
+            raise SystemExit(f"--noise-arg expects KEY=VALUE, got {item!r}")
+        key, value = item.split("=", 1)
+        kwargs[key.strip()] = float(value)
+    return kwargs
+
+
+def measure(data, config, experiment, sigma: float | None, seed: int,
+            family: str | None = None, noise_kwargs: dict | None = None,
+            bias: float = 0.0):
+    r"""The measurement :math:`y` fed to the bank, and the law that produced it.
+
+    ``sigma = None`` returns the run's own data, i.e. the level it trained at;
+    ``sigma = 0`` returns :math:`y = x_1` exactly.  Any other value re-measures
+    the *same* trajectories, so two calls differ by :math:`\omega` alone.
+
+    Returns ``(y, sigma, noise)``, with ``noise`` the law itself so the caller
+    can report its realized mean and support rather than restating its name.
+    """
+    if sigma is None:
+        return data.y, config.data.noise_sigma, None
+    if sigma <= 0 and not bias:
+        return data.x[..., 0], 0.0, None
+    noise = build_noise_model(
+        family or config.data.noise_family, sigma,
+        bias=bias, bias_relative=True,
+        **({"truncation_sigmas": config.data.noise_truncation_sigmas}
+           if not (noise_kwargs or {}).get("truncation_sigmas") else {}),
+        **(noise_kwargs or {}),
+    )
+    omega = noise.sample(tuple(data.y.shape),
+                         generator=make_generator(seed),
+                         dtype=experiment.dtype).to(data.y.device)
+    return data.x[..., 0] + omega, sigma, noise
+
+
+def fine_measurement(experiment, data, index, law, dt: float, seed: int):
+    r"""One trajectory's measurement on a grid ``dt`` fine, agreeing with the data grid.
+
+    The estimator is fixed to :math:`N` samples at the data grid's
+    :math:`\Delta t`, so a denser trace must not be drawn as though it were the
+    input.  This keeps the two consistent instead: the state is re-integrated on
+    the fine grid, one noise realization is drawn there, and the data grid is
+    recovered by *subsampling that same realization*.  The :math:`N` points the
+    bank consumes are therefore a strict subset of the curve on the page ---
+    every marker lies exactly on the trace --- rather than an independent draw
+    that would merely look compatible.
+
+    Requires the fine grid to contain the data grid, i.e. the horizon to divide
+    into a whole number of strides; anything else would put the markers off the
+    curve.
+    """
+    horizon = float(data.t[-1])
+    n_data = data.t.numel()
+    steps = int(round(horizon / dt))
+    if steps % (n_data - 1) != 0:
+        raise SystemExit(
+            f"--fine-dt {dt:g} does not divide the data grid: {steps} fine steps "
+            f"over {n_data - 1} data intervals. Pick a dt with "
+            f"{horizon:g}/dt a multiple of {n_data - 1}."
+        )
+    stride = steps // (n_data - 1)
+    if data.coefficients is None:
+        raise SystemExit("the dataset carries no disturbance coefficients, so the "
+                         "trajectory cannot be re-integrated; use --fine-dt 0")
+
+    t_fine = torch.linspace(0.0, horizon, steps + 1,
+                            dtype=data.t.dtype, device=data.t.device)
+    x_fine = rk4_integrate(
+        experiment.system, t_fine, data.x[index:index + 1, 0, :],
+        data.theta[index],
+        BasisDisturbance(experiment.basis, data.coefficients[index]),
+        substeps=8,
+    )
+    x1 = x_fine[0, :, 0]
+    omega = law.sample((steps + 1,), generator=make_generator(seed),
+                       dtype=data.t.dtype).to(data.t.device)
+    y_fine = x1 + omega
+    # The re-integration is a second numerical solve of the same problem, so it
+    # is checked against the stored trajectory rather than trusted.
+    drift = float((x1[::stride] - data.x[index, :, 0]).abs().max())
+    return t_fine, y_fine, stride, drift
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run", type=Path, default=Path("outputs/big_w10_v2_s1"))
     parser.add_argument("--trajectory", type=int, default=0,
                         help="index into the held-out split")
     parser.add_argument("--sigma", type=float, default=None,
-                        help="measurement noise std to draw the figure at. The "
+                        help="measurement noise std for the noisy estimate. The "
                              "same held-out trajectory is kept and only the "
-                             "measurement is re-drawn, so the panels isolate the "
-                             "effect of the noise. 0 is noise-free. Omit to use "
-                             "the level the run was trained at.")
+                             "measurement is re-drawn, so the two estimates "
+                             "differ by the noise alone. Omit to use the level "
+                             "the run was trained at.")
+    parser.add_argument("--noise-family", default=None,
+                        choices=sorted(NOISE_FAMILIES),
+                        help="law for the noisy measurement. 'mixture' is an "
+                             "asymmetric mixture of two Gaussians and is the "
+                             "only family here whose mean is not zero. Defaults "
+                             "to the family the run trained on.")
+    parser.add_argument("--noise-arg", action="append", default=[],
+                        metavar="KEY=VALUE",
+                        help="parameter for that family, repeatable. For "
+                             "'mixture': weight, separation, outlier_scale, "
+                             "truncation_sigmas.")
+    parser.add_argument("--bias", type=float, default=0.0,
+                        help="additive offset in units of sigma, applied on top "
+                             "of the family. Shifts a symmetric law bodily, "
+                             "which is a different thing from the mixture's own "
+                             "asymmetry.")
+    parser.add_argument("--fine-dt", type=float, default=0.001,
+                        help="draw the measured output on a grid this fine, the "
+                             "data grid being a subsample of it. 0 draws the "
+                             "data grid only.")
+    parser.add_argument("--no-output", dest="output", action="store_false",
+                        help="drop the measured-output panel, leaving x2, x3 "
+                             "and d only")
+    parser.add_argument("--no-noise-free", dest="noise_free", action="store_false",
+                        help="draw only the noisy estimate, not the sigma = 0 "
+                             "reference")
     parser.add_argument("--noise-seed", type=int, default=909)
     parser.add_argument("--width", type=float, default=7.0,
                         help="inches; 7.0 is Elsevier full width, 3.4 single column")
-    parser.add_argument("--height", type=float, default=4.8)
+    parser.add_argument("--height", type=float, default=None,
+                        help="inches; defaults to 6.0 with the output panel, "
+                             "4.8 without")
     parser.add_argument("--fontsize", type=float, default=9.0)
     parser.add_argument("--sans", action="store_true",
                         help="sans-serif instead of serif")
@@ -121,6 +278,8 @@ def main() -> int:
     parser.add_argument("--out", type=Path, default=None)
     args = parser.parse_args()
     setup_logging("WARNING")
+    if args.height is None:
+        args.height = 6.0 if args.output else 4.8
     paper_style(args.fontsize, serif=not args.sans)
 
     config = RunConfig.from_yaml(args.run / "config.resolved.yaml")
@@ -132,78 +291,150 @@ def main() -> int:
     data = experiment.val_data
     index = min(args.trajectory, len(data) - 1)
 
-    # Re-measuring keeps the states, parameters and disturbance of the held-out
-    # trajectory fixed and changes only omega, so a figure at a different sigma
-    # differs from this one by the noise alone.  The estimate is recomputed from
-    # the new measurement -- the model is never retrained, so what the panels
-    # show is how the trained estimator behaves on a noisier sensor.
-    if args.sigma is None:
-        measured = data.y
-        sigma = config.data.noise_sigma
-    else:
-        if args.sigma > 0:
-            noise = build_noise_model(
-                config.data.noise_family, args.sigma,
-                truncation_sigmas=config.data.noise_truncation_sigmas,
-            )
-            omega = noise.sample(tuple(data.y.shape),
-                                 generator=make_generator(args.noise_seed),
-                                 dtype=experiment.dtype).to(data.y.device)
-        else:
-            omega = torch.zeros_like(data.y)
-        measured = data.x[..., 0] + omega
-        sigma = args.sigma
+    noisy, sigma, law = measure(data, config, experiment, args.sigma,
+                                args.noise_seed, args.noise_family,
+                                noise_arguments(args.noise_arg), args.bias)
+    # A denser realization of the same law for the panel, with the displayed
+    # trajectory's measurement replaced by its subsample, so the estimate shown
+    # is the one produced by exactly the samples drawn on the page.
+    fine = None
+    if args.output and args.fine_dt and args.fine_dt > 0 and sigma > 0:
+        law_for_trace = law if law is not None else build_noise_model(
+            config.data.noise_family, sigma,
+            truncation_sigmas=config.data.noise_truncation_sigmas,
+        )
+        t_fine, y_fine, stride, drift = fine_measurement(
+            experiment, data, index, law_for_trace, args.fine_dt, args.noise_seed)
+        noisy = noisy.clone()
+        noisy[index] = y_fine[::stride]
+        fine = (t_fine.cpu().numpy(), y_fine.cpu().numpy(), stride, drift)
 
     with torch.no_grad():
-        estimates = experiment.bank.estimate(measured, data.t, experiment.t_coll)
+        est_noisy = experiment.bank.estimate(noisy, data.t, experiment.t_coll)
+        if args.noise_free:
+            clean, *_ = measure(data, config, experiment, 0.0, args.noise_seed)
+            est_clean = experiment.bank.estimate(clean, data.t, experiment.t_coll)
+
+    # Panel j reads state column ``panel_columns[j]``, or the disturbance when
+    # that entry is None.  The measured coordinate x_1 leads when the output
+    # panel is on, so adding or dropping it shifts nothing else.
+    panel_columns = ([0] if args.output else []) + [1, 2, None]
+
+    def pick(est, j):
+        """Panel j of an estimate."""
+        column = panel_columns[j]
+        value = est.d[index] if column is None else est.x[index, :, column]
+        return value.cpu().numpy()
 
     t = data.t.cpu().numpy()
-    panels = [
-        (data.x[index, :, 1].cpu().numpy(), estimates.x[index, :, 1].cpu().numpy(),
-         r"$x_2$", "x2"),
-        (data.x[index, :, 2].cpu().numpy(), estimates.x[index, :, 2].cpu().numpy(),
-         r"$x_3$", "x3"),
-        (data.d[index].cpu().numpy(), estimates.d[index].cpu().numpy(),
-         r"$d$", "d "),
-    ]
+    truths = [(data.d[index] if c is None else data.x[index, :, c]).cpu().numpy()
+              for c in panel_columns]
+    labels = [(r"$d$" if c is None else rf"$x_{{{c + 1}}}$") for c in panel_columns]
+    names = [("d " if c is None else f"x{c + 1}") for c in panel_columns]
+    measured = noisy[index].cpu().numpy()
 
-    fig, axes = plt.subplots(3, 1, figsize=(args.width, args.height), sharex=True,
+    # Series drawn back to front: the noisy estimate sits on top, since it is the
+    # curve the figure is about.
+    # (legend label, plain label for the console, colour, dash, linewidth, z-order)
+    series = []
+    if args.noise_free:
+        series.append(("noise-free", "noise-free", ESTIMATE1, DASH_CLEAN, 1.45, 3))
+        family = args.noise_family or config.data.noise_family
+        # Name the law in the legend whenever it is not the plain zero-mean
+        # Gaussian: at a matched sigma the shape is the only thing that differs,
+        # so a figure that does not say which shape cannot be read.
+        tag = (f"$\\sigma$ = {sigma:g}" if family == "gaussian" and not args.bias
+               else f"{family}, $\\sigma$ = {sigma:g}")
+        series.append((tag, f"sigma={sigma:g}", ESTIMATE2, DASH_CLEAN, 1.7, 4))
+    else:
+        series.append(("estimated", "estimated", ESTIMATE1, DASH_CLEAN, 1.4, 4))
+    estimates = ([est_clean] if args.noise_free else []) + [est_noisy]
+
+    fig, axes = plt.subplots(len(panel_columns), 1,
+                             figsize=(args.width, args.height), sharex=True,
                              gridspec_kw={"hspace": 0.16})
-    for ax, (truth, est, label, _) in zip(axes, panels):
-        ax.plot(t, truth, color=TRUTH, lw=1.5, zorder=3, label="true")
-        ax.plot(t, est, color=ESTIMATE, lw=1.4, ls=(0, (4.5, 2.2)), zorder=4,
-                label="estimated")
-        ax.set_ylabel(label)
+    for j, ax in enumerate(axes):
+        if args.output and j == 0:
+            # Drawn first and underneath: on this panel the clean output is the
+            # blue truth, so the noisy trace has to read as the scatter around
+            # it rather than as a series competing with it.  The fine trace is
+            # drawn when there is one; the data-grid samples are not marked.
+            if fine is None:
+                ax.plot(t, measured, color=MEASURED, lw=0.7, alpha=0.8, zorder=1,
+                        label=r"$y$")
+            else:
+                ax.plot(fine[0], fine[1], color=MEASURED, lw=0.35, alpha=0.85,
+                        zorder=1, label=r"$y$")
+        ax.plot(t, truths[j], color=TRUTH, lw=2, zorder=2,
+                label="True" if j == 0 else None)
+        for i, (est, (name, _, colour, dash, lw, z)) in enumerate(zip(estimates, series)):
+            ax.plot(t, pick(est, j), color=colour, ls=dash, lw=2, zorder=z,
+                    label="EPIBE" if i == 0 else "PIBE")
+        ax.set_ylabel(labels[j])
         if args.annotate:
-            rmse = float(np.sqrt(np.mean((est - truth) ** 2)))
-            ax.annotate(f"RMSE {rmse:.2e}", xy=(0.995, 0.06),
+            text = "   ".join(
+                f"{name}  {np.sqrt(np.mean((pick(est, j) - truths[j]) ** 2)):.1e}"
+                for est, (name, *_) in zip(estimates, series))
+            ax.annotate(f"RMSE  {text}", xy=(0.995, 0.06),
                         xycoords="axes fraction", ha="right",
                         color=INK_SOFT, fontsize=args.fontsize - 1.5)
 
     axes[-1].set_xlabel(r"$t$  [s]")
     axes[-1].set_xlim(t[0], t[-1])
-    axes[0].legend(loc="lower center", bbox_to_anchor=(0.5, 1.02), ncol=2,
-                   columnspacing=2.4, handlelength=2.6)
+    axes[0].legend(loc="lower center", bbox_to_anchor=(0.5, 1.02),
+                   ncol=1 + len(series) + (1 if args.output else 0),
+                   columnspacing=1.8, handlelength=2.6)
     fig.tight_layout(rect=(0, 0, 1, 0.965), pad=0.4)
 
+    stem = "paper_estimates" + ("_cmp" if args.noise_free else "")
     if args.out is not None:
         out = args.out
     elif args.sigma is None:
-        out = args.run / "figures" / "paper_estimates.pdf"
+        out = args.run / "figures" / f"{stem}.pdf"
     else:
-        tag = f"sig{sigma:g}_traj{index}".replace(".", "p")
-        out = args.run / "figures" / f"paper_estimates_{tag}.pdf"
+        family = args.noise_family or config.data.noise_family
+        # The family and the bias go in the name: otherwise two runs at the same
+        # sigma but different laws overwrite each other silently.
+        parts = [f"sig{sigma:g}"]
+        if family != "gaussian":
+            parts.append(family)
+        if args.bias:
+            parts.append(f"bias{args.bias:g}")
+        parts.append(f"traj{index}")
+        tag = "_".join(parts).replace(".", "p")
+        out = args.run / "figures" / f"{stem}_{tag}.pdf"
     out.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out)                                  # vector, for the paper
     fig.savefig(out.with_suffix(".png"), dpi=400)     # raster, for quick looks
     plt.close(fig)
 
     print(f"run        : {args.run.name}, held-out trajectory {index}")
-    print(f"noise      : sigma = {sigma:g}"
+    if fine is not None:
+        print(f"fine trace : {len(fine[0])} samples at dt = {args.fine_dt:g}, "
+              f"stride {fine[2]} to the data grid; re-integration agrees with "
+              f"the stored trajectory to {fine[3]:.2e}")
+    print(f"noisy      : sigma = {sigma:g}"
           + ("  (as trained)" if args.sigma is None
              else f"  (re-measured; trained at {config.data.noise_sigma:g})"))
-    for truth, est, _, name in panels:
-        print(f"  {name} RMSE  {np.sqrt(np.mean((est - truth) ** 2)):.4e}")
+    if law is not None:
+        print(f"noise law  : {law!r}")
+        print(f"             mean = {law.mean:+.5g}"
+              f"  ({100 * law.mean / sigma:+.1f}% of sigma)"
+              + ("  -- zero-mean, Proposition 1 applies"
+                 if abs(law.mean) < 1e-12 else
+                 "  -- NOT zero-mean, so Proposition 1's premise fails and the"
+                 " offset propagates through the chain"))
+    head = f"{'':>5}" + "".join(f"{plain:>14}" for _, plain, *_ in series)
+    print("\nRMSE" + (" (ratio = noisy / noise-free)" if args.noise_free else "")
+          + "\n" + head + (f"{'ratio':>9}" if args.noise_free else ""))
+    print("-" * (len(head) + (9 if args.noise_free else 0)))
+    for j, name in enumerate(names):
+        errs = [float(np.sqrt(np.mean((pick(est, j) - truths[j]) ** 2)))
+                for est in estimates]
+        row = f"{name:>5}" + "".join(f"{e:>14.4e}" for e in errs)
+        if args.noise_free:
+            row += f"{errs[-1] / errs[0]:>9.2f}"
+        print(row)
     print(f"\nwrote {out}\nwrote {out.with_suffix('.png')}")
     return 0
 

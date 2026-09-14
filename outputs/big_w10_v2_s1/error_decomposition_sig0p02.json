@@ -1,0 +1,50 @@
+{
+  "run": "big_w10_v2_s1",
+  "split": "val",
+  "sigma": 0.02,
+  "trajectories": 410,
+  "quantities": {
+    "x_1": {
+      "cell": 2,
+      "intrinsic": 0.15201777439943862,
+      "propagated": 0.0,
+      "total": 0.15201777439943862,
+      "prop_share": 0.0
+    },
+    "x_2": {
+      "cell": 2,
+      "intrinsic": 2.2103653850556344,
+      "propagated": 0.0,
+      "total": 2.2103653850556344,
+      "prop_share": 0.0
+    },
+    "x_3": {
+      "cell": 3,
+      "intrinsic": 2.9827384237091596,
+      "propagated": 1.4257236931655246,
+      "total": 3.441588328469421,
+      "prop_share": 0.41426328691659275
+    },
+    "theta_1": {
+      "cell": 2,
+      "intrinsic": 2.6424179141055832,
+      "propagated": 0.0,
+      "total": 2.6424179141055832,
+      "prop_share": 0.0
+    },
+    "theta_2": {
+      "cell": 3,
+      "intrinsic": 0.31454933083872766,
+      "propagated": 2.039018527403068,
+      "total": 2.3192999130750978,
+      "prop_share": 0.8791525907917566
+    },
+    "d": {
+      "cell": 4,
+      "intrinsic": 1.819379264160481,
+      "propagated": 2.469253427804504,
+      "total": 2.8618876909440885,
+      "prop_share": 0.8628058451133486
+    }
+  }
+}

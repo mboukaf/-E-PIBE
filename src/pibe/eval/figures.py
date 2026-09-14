@@ -21,10 +21,18 @@ from pibe.utils.logging import get_logger  # noqa: E402
 
 logger = get_logger(__name__)
 
-# Colourblind-safe, checked for adjacent-pair separation.
-TRUTH = "#2a78d6"
-EST = "#eb6834"
-MEAS = "#1baf7a"
+# The two identity colours of the architecture diagram (Docs/automa.pdf), read
+# from its own content stream: indigo for the unitary estimation cell, crimson
+# for the recursive bank.  Reusing them here makes the result figures and the
+# architecture figure one visual family.  Validated as a categorical pair --
+# CVD dE 13.9 (protan), normal-vision 17.6, both above 3:1 on white.
+#
+# The noisy measurement is context rather than a third entity, so it is neutral
+# grey: it keeps the two hues meaning "true" and "estimated" only, and avoids
+# forcing a third hue to separate from both.
+TRUTH = "#534ab7"
+EST = "#9a4f6e"
+MEAS = "#96958f"
 
 plt.rcParams.update({
     "figure.dpi": 130, "savefig.dpi": 130, "font.size": 9,

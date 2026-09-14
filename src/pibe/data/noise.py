@@ -42,6 +42,16 @@ class NoiseModel(ABC):
     def bound(self) -> float:
         r"""The support bound :math:`\bar w`."""
 
+    @property
+    def mean(self) -> float:
+        r"""The law's mean :math:`\mu_\omega`.
+
+        Zero for every symmetric family here, which is what Proposition 1
+        assumes.  Overridden by the laws that break it, so a caller can report
+        the assumption it is violating instead of inferring it from the name.
+        """
+        return 0.0
+
 
 class NoiseFree(NoiseModel):
     """The degenerate noise-free case, :math:`\\omega \\equiv 0`."""
@@ -186,7 +196,8 @@ class QuantileNoise(NoiseModel):
         Number of midpoints used to calibrate the mean and variance.
     """
 
-    def __init__(self, sigma: float, quadrature_points: int = 200_001) -> None:
+    def __init__(self, sigma: float, quadrature_points: int = 200_001,
+                 center: bool = True) -> None:
         if sigma <= 0:
             raise ValueError(f"sigma must be positive, got {sigma}")
         self.sigma = float(sigma)
@@ -197,22 +208,38 @@ class QuantileNoise(NoiseModel):
         std = torch.sqrt(torch.mean((values - mean) ** 2))
         if not bool(torch.isfinite(std)) or float(std) <= 0:
             raise ValueError(f"{type(self).__name__} has degenerate spread")
-        self._shift = float(mean)
+        self._shift = float(mean) if center else 0.0
         self._scale = self.sigma / float(std)
+        self._mean = float((mean - self._shift) * self._scale)
         # The support bound is attained at the ends of ``(0, 1)``, which the
         # midpoint grid above never reaches; evaluate there directly so the
-        # stated bound really does contain every draw.
+        # stated bound really does contain every draw.  A piecewise quantile --
+        # any mixture -- also attains a component's own truncation just inside
+        # each branch boundary, which the two outer ends do not see, so those
+        # are probed too.
         eps = torch.finfo(torch.float64).eps
-        ends = self.quantile(torch.tensor([eps, 1.0 - eps], dtype=torch.float64))
-        self._bound = float(((ends - mean) * self._scale).abs().max())
+        probes = [eps, 1.0 - eps]
+        for b in self.branch_points:
+            probes += [b * (1.0 - eps), min(b + eps, 1.0 - eps)]
+        values = self.quantile(torch.tensor(probes, dtype=torch.float64))
+        self._bound = float(((values - self._shift) * self._scale).abs().max())
 
     @abstractmethod
     def quantile(self, p: Tensor) -> Tensor:
         """Inverse CDF of the unscaled shape, for ``p`` in ``(0, 1)``."""
 
     @property
+    def branch_points(self) -> tuple[float, ...]:
+        """``p`` values where :meth:`quantile` switches mixture component."""
+        return ()
+
+    @property
     def bound(self) -> float:
         return self._bound
+
+    @property
+    def mean(self) -> float:
+        return self._mean
 
     def sample(
         self,
@@ -331,6 +358,10 @@ class ContaminatedGaussianNoise(QuantileNoise):
         )
         return width * self._truncated_normal_quantile(rescaled)
 
+    @property
+    def branch_points(self) -> tuple[float, ...]:
+        return (self.contamination,)
+
     def _truncated_normal_quantile(self, p: Tensor) -> Tensor:
         """Inverse CDF of a unit normal truncated at ``+/- alpha``."""
         alpha = torch.tensor(self._alpha, dtype=p.dtype)
@@ -365,6 +396,102 @@ class SkewedNoise(QuantileNoise):
         return -torch.log(1.0 - p * mass)
 
 
+class GaussianMixtureNoise(QuantileNoise):
+    r"""An asymmetric mixture of two Gaussians, with a mean that is not zero.
+
+    Every other family here is symmetric, so its mean vanishes and Proposition
+    1's argument applies: a zero-mean noise contributes no systematic term to
+    the quadratic data loss.  This law breaks that assumption *structurally*
+    rather than by adding a constant.  A fraction ``weight`` of the samples come
+    from a second Gaussian displaced by ``separation`` and generally narrower,
+    so the law is bimodal, skewed, and carries
+
+    .. math:: \mu_\omega = \texttt{weight} \cdot \texttt{separation}
+
+    before rescaling --- a mean that no reweighting of the two components can
+    remove while keeping them apart.  This is the difference from
+    :class:`BiasedNoise`, which shifts a symmetric law bodily: there the shape
+    stays symmetric and the mean is an additive constant one could in principle
+    calibrate out, whereas here the mean is a property of the shape itself.
+
+    The realized standard deviation is still exactly ``sigma``, as for every
+    family here, so the mean is the only thing that changes at a matched noise
+    level.  Note what that implies: the spread is the *total* spread of the
+    mixture, which includes the separation between the modes, so raising
+    ``separation`` at fixed ``sigma`` narrows both components.
+
+    This is the regime EPIBE (Section 3.2) exists for.  PIBE's quadratic data
+    term is minimized by an :math:`\hat x_1` displaced by :math:`\mu_\omega`,
+    and Eq. (1)'s chain carries that displacement into the states, the
+    parameters and the disturbance.
+
+    Parameters
+    ----------
+    weight
+        Fraction of samples drawn from the displaced component.
+    separation
+        Location of that component, in units of the core's width.  Positive
+        puts the extra mass above zero, so the mean is positive.
+    outlier_scale
+        Width of the displaced component relative to the core.
+    truncation_sigmas
+        Truncation of each component, in units of its own width.
+    """
+
+    def __init__(
+        self,
+        sigma: float,
+        weight: float = 0.3,
+        separation: float = 2.5,
+        outlier_scale: float = 0.6,
+        truncation_sigmas: float = 4.0,
+        **kwargs,
+    ) -> None:
+        if not 0.0 < weight < 1.0:
+            raise ValueError(f"weight must lie in (0, 1), got {weight}")
+        if separation == 0.0:
+            raise ValueError("separation must be nonzero, else the mean is zero "
+                             "and this is just a symmetric mixture")
+        if outlier_scale <= 0.0:
+            raise ValueError(f"outlier_scale must be positive, got {outlier_scale}")
+        self.weight = float(weight)
+        self.separation = float(separation)
+        self.outlier_scale = float(outlier_scale)
+        self._alpha = float(truncation_sigmas)
+        # center=False is the whole point: the base class would otherwise
+        # subtract the mean this law exists to have.
+        super().__init__(sigma, center=False, **kwargs)
+
+    def quantile(self, p: Tensor) -> Tensor:
+        # Splitting the uniform range in proportion to the mixture weights draws
+        # the component with the right probability and then draws within it, so
+        # the samples and every moment computed from this map are exact --- the
+        # same construction as ContaminatedGaussianNoise.
+        w = self.weight
+        displaced = p < w
+        rescaled = torch.where(displaced, p / w, (p - w) / (1.0 - w))
+        core = self._truncated_normal_quantile(rescaled)
+        return torch.where(displaced, self.separation + self.outlier_scale * core, core)
+
+    @property
+    def branch_points(self) -> tuple[float, ...]:
+        return (self.weight,)
+
+    def _truncated_normal_quantile(self, p: Tensor) -> Tensor:
+        """Inverse CDF of a unit normal truncated at ``+/- alpha``."""
+        alpha = torch.tensor(self._alpha, dtype=p.dtype)
+        lower, upper = torch.special.ndtr(-alpha), torch.special.ndtr(alpha)
+        u = (lower + p * (upper - lower)).clamp(
+            min=torch.finfo(p.dtype).tiny, max=1.0 - torch.finfo(p.dtype).eps
+        )
+        return torch.special.ndtri(u)
+
+    def __repr__(self) -> str:  # pragma: no cover - trivial
+        return (f"GaussianMixtureNoise(sigma={self.sigma:g}, weight={self.weight:g}, "
+                f"separation={self.separation:g}, mean={self._mean:+.4g}, "
+                f"bound={self._bound:.4g})")
+
+
 class BiasedNoise(NoiseModel):
     r"""Any noise law shifted off zero mean --- the case PIBE does not cover.
 
@@ -396,6 +523,11 @@ class BiasedNoise(NoiseModel):
         return float(getattr(self.base, "sigma", float("nan")))
 
     @property
+    def mean(self) -> float:
+        """The base law's mean plus the offset."""
+        return self.base.mean + self.bias
+
+    @property
     def bound(self) -> float:
         return self.base.bound + abs(self.bias)
 
@@ -419,6 +551,7 @@ NOISE_FAMILIES = {
     "laplace": TruncatedLaplaceNoise,
     "contaminated": ContaminatedGaussianNoise,
     "skewed": SkewedNoise,
+    "mixture": GaussianMixtureNoise,
 }
 
 

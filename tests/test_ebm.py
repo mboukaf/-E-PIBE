@@ -485,3 +485,96 @@ def test_centered_warmup_is_the_quadratic_term_with_the_location_profiled_out() 
     downstream = bank.cell_loss(3, data.y, experiment.t_coll, outputs, lam=1.0)
     r3 = bank.consistency_residual(3, data.y, outputs)
     assert float(downstream.data) == pytest.approx(float((r3**2).mean()))
+
+
+# ----------------------------------------------------------------------
+# sensor-offset location: profiled, offset parameter, amortized search
+# ----------------------------------------------------------------------
+
+
+def test_location_options_are_validated() -> None:
+    with pytest.raises(ValueError, match="location"):
+        EBMConfig(enabled=True, location="anywhere").validate(n_par=4, n_total=6)
+    with pytest.raises(ValueError, match="offset_score"):
+        EBMConfig(enabled=True, offset_score="guess").validate(n_par=4, n_total=6)
+    with pytest.raises(ValueError, match="offset_window"):
+        EBMConfig(enabled=True, offset_window=[1.0, 0.0]).validate(n_par=4, n_total=6)
+
+
+def test_profiled_energy_term_is_invariant_to_a_common_shift() -> None:
+    """The data term cannot see the location; that is left to the physics."""
+    experiment = _small_epibe_experiment(cells=[2], location="profiled")
+    bank = experiment.bank
+    bank.use_energy = True
+    bank.eval()
+    data = experiment.train_data
+    with torch.enable_grad():
+        outputs = bank(target_cell=2, y=data.y, t_data=data.t,
+                       t_coll=experiment.t_coll, mode=Mode.GLOBAL, create_graph=False)
+        base = bank.cell_loss(2, data.y, experiment.t_coll, outputs, lam=1.0)
+        moved = bank.cell_loss(2, data.y + 0.03, experiment.t_coll, outputs, lam=1.0)
+    assert float(moved.data) == pytest.approx(float(base.data), rel=1e-10)
+
+
+def test_offset_parameter_shifts_only_the_measured_reconstruction() -> None:
+    experiment = _small_epibe_experiment(cells=[2], offset_parameter=True)
+    bank = experiment.bank
+    data = experiment.train_data
+    kwargs = dict(t_data=data.t, t_coll=experiment.t_coll, mode=Mode.GLOBAL, create_graph=False)
+    with torch.enable_grad():
+        before = bank(target_cell=bank.final_index, y=data.y, **kwargs)
+        with torch.no_grad():
+            bank.offset.fill_(0.25)
+        after = bank(target_cell=bank.final_index, y=data.y, **kwargs)
+    assert torch.allclose(after[2].x_prev_data, before[2].x_prev_data + 0.25)
+    assert torch.allclose(after[2].x_prev_dot_coll, before[2].x_prev_dot_coll)
+    assert torch.allclose(after[2].x_new_data, before[2].x_new_data)
+
+
+def test_amortized_bank_reads_out_the_offset_corrected_measurement() -> None:
+    experiment = _small_epibe_experiment(cells=[2], location="amortized")
+    bank = experiment.bank
+    data = experiment.train_data
+    bank.location.fill_(0.3)
+    stored = bank.estimate(data.y, data.t, experiment.t_coll)
+    plain = EstimatorBank.estimate(bank, data.y - 0.3, data.t, experiment.t_coll)
+    explicit = bank.estimate(data.y, data.t, experiment.t_coll, offset=0.3)
+    assert torch.equal(stored.x, plain.x) and torch.equal(explicit.x, plain.x)
+    assert "location" in bank.state_dict()
+
+
+def test_offset_buffers_do_not_change_existing_checkpoints() -> None:
+    """A run without the new options must keep loading old state dicts strictly."""
+    bank = _small_epibe_experiment(cells=[2]).bank
+    keys = set(bank.state_dict())
+    assert "location" not in keys and "residual_mean" not in keys and "offset" not in keys
+
+
+def test_simulated_output_matches_the_data_generator() -> None:
+    from pibe.data.disturbance import BasisDisturbance
+    from pibe.data.simulate import rk4_integrate
+    from pibe.eval.offset_shooting import simulate_output
+
+    experiment = _small_epibe_experiment()
+    data = experiment.data
+    x0 = data.x[:, 0, :]
+    a = data.coefficients
+    theta = experiment.system.theta_true
+    ours = simulate_output(experiment.system, experiment.basis, x0, theta, a, data.t, substeps=8)
+    for i in range(len(data)):
+        reference = rk4_integrate(experiment.system, data.t, x0[i:i + 1], theta.reshape(1, -1),
+                                  BasisDisturbance(experiment.basis, a[i]), substeps=8)[0, :, 0]
+        assert torch.allclose(ours[i], reference, atol=1e-10)
+
+
+def test_amortization_feeds_offset_measurements_only_while_amortizing() -> None:
+    experiment = _small_epibe_experiment(cells=[2], location="amortized",
+                                         offset_window=[0.5, 0.6])
+    trainer = experiment.make_trainer()
+    y = experiment.train_data.y
+    assert torch.equal(trainer.measurement_for_step(y), y)
+    trainer._amortizing = True
+    shift = y - trainer.measurement_for_step(y)
+    assert float(shift.min()) >= 0.5 - 1e-12 and float(shift.max()) <= 0.6 + 1e-12
+    # One offset per trajectory, constant along it.
+    assert torch.allclose(shift, shift[:, :1].expand_as(shift))

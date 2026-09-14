@@ -56,13 +56,14 @@ PINN parameters only, and :meth:`ebm_parameters` /
 from __future__ import annotations
 
 from collections.abc import Iterator
+from dataclasses import replace
 
 import torch
 from torch import Tensor, nn
 
 from pibe.basis.base import DisturbanceBasis
 from pibe.config import ArchitectureConfig, EBMConfig
-from pibe.core.bank import EstimatorBank
+from pibe.core.bank import EstimatorBank, Mode
 from pibe.core.cell import CellOutput
 from pibe.core.losses import CellLoss, data_loss, local_loss, physics_loss
 from pibe.core.residuals import final_residual, state_residual
@@ -156,6 +157,26 @@ class EnergyEstimatorBank(EstimatorBank):
         # produced residuals worth fitting.
         self.use_energy = False
 
+        # Optional global shift of x_hat^2_1, see EBMConfig.offset_parameter.
+        # Registered only when requested so existing checkpoints load unchanged.
+        if self.ebm_config.offset_parameter:
+            self.offset = nn.Parameter(torch.zeros((), dtype=dtype))
+        else:
+            self.offset = None
+        # Running mean of the first cell's raw residual.  Under a profiled
+        # location the density never sees it, so it is what carries the
+        # location into mu_omega_hat.
+        self.register_buffer(
+            "residual_mean", torch.zeros((), dtype=dtype),
+            persistent=self.ebm_config.location == "profiled",
+        )
+        # The sensor offset selected by the amortized location search; the
+        # bank sees y - location at inference.
+        self.register_buffer(
+            "location", torch.zeros((), dtype=dtype),
+            persistent=self.ebm_config.location == "amortized",
+        )
+
     # ------------------------------------------------------------------
     # structure
     # ------------------------------------------------------------------
@@ -202,6 +223,81 @@ class EnergyEstimatorBank(EstimatorBank):
         bound = self.ebm_config.weight_bound if weight_bound is None else weight_bound
         for k in self.cell_indices:
             self.ebm(k).project(bound)
+
+    # ------------------------------------------------------------------
+    # forward
+    # ------------------------------------------------------------------
+
+    def forward(self, target_cell, y, t_data, t_coll, mode=Mode.GLOBAL,
+                need_derivative=True, create_graph=True):
+        """The inherited chain, with the optional global offset added to x_hat^2_1.
+
+        The offset is constant in time, so the derivative is unchanged.  Cell 3
+        onwards never reads x_hat^2_1 as an encoder input, so shifting it after
+        the chain has run is identical to shifting it inside.
+        """
+        outputs = super().forward(
+            target_cell, y, t_data, t_coll, mode=mode,
+            need_derivative=need_derivative, create_graph=create_graph,
+        )
+        if self.offset is not None:
+            shift = self.offset
+            if mode is Mode.LOCAL and target_cell != 2:
+                shift = shift.detach()
+            first = outputs[2]
+            outputs[2] = replace(
+                first,
+                x_prev_data=first.x_prev_data + shift,
+                x_prev_coll=first.x_prev_coll + shift,
+            )
+        return outputs
+
+    @torch.no_grad()
+    def estimate(self, y: Tensor, t_data: Tensor, t_coll: Tensor, offset: float | None = None):
+        """The inherited readout of ``y - offset``; the stored location when ``offset`` is None."""
+        shift = self.location if offset is None else offset
+        return super().estimate(y - shift, t_data, t_coll)
+
+    # ------------------------------------------------------------------
+    # amortized location search
+    # ------------------------------------------------------------------
+
+    def chain_cost(self, y: Tensor, t_data: Tensor, t_coll: Tensor, lam: float) -> float:
+        r"""Every term of :math:`\mathcal{L}^{n+1}_{Tot}` except the first cell's data term.
+
+        That term is fitted at every candidate offset alike, so it carries no
+        information about the location; what is left is the physics of every
+        cell and the downstream consistency penalties, weighted as in Eq. (27).
+        Always scored on PIBE's quadratic consistency terms.
+        """
+        from pibe.core.losses import global_weights
+
+        was_training, was_energy = self.training, self.use_energy
+        self.eval()
+        self.use_energy = False
+        try:
+            with torch.enable_grad():
+                outputs = self.forward(self.final_index, y, t_data, t_coll,
+                                       mode=Mode.GLOBAL, create_graph=False)
+                weights = global_weights(self.final_index)
+                total = 0.0
+                for k in self.cell_indices:
+                    loss = super().cell_loss(k, y, t_coll, outputs, lam)
+                    total += weights[k] * (
+                        lam * float(loss.physics) + (0.0 if k == 2 else float(loss.data))
+                    )
+        finally:
+            self.train(was_training)
+            self.use_energy = was_energy
+        return total
+
+    def offset_profile(self, y: Tensor, t_data: Tensor, t_coll: Tensor, lam: float,
+                       offsets: Tensor) -> Tensor:
+        """:meth:`chain_cost` of ``y - c`` for every candidate offset ``c``."""
+        return torch.tensor(
+            [self.chain_cost(y - float(c), t_data, t_coll, lam) for c in offsets],
+            dtype=y.dtype,
+        )
 
     # ------------------------------------------------------------------
     # residuals and losses
@@ -265,7 +361,17 @@ class EnergyEstimatorBank(EstimatorBank):
             )
 
         if self.uses_energy_at(cell_index):
-            data = self.ebm(cell_index).negative_log_likelihood(target - prediction)
+            residual = target - prediction
+            model = self.ebm(cell_index)
+            if cell_index == 2:
+                if self.training:
+                    with torch.no_grad():
+                        self.residual_mean.mul_(0.99).add_(0.01 * residual.mean())
+                if self.ebm_config.location in ("profiled", "amortized"):
+                    residual = residual - residual.mean()
+            data = model.negative_log_likelihood(residual)
+            if cell_index == 2 and self.ebm_config.nll_scale == "variance":
+                data = data * model.moments().std ** 2
         elif (
             self.ebm_config.centered_warmup and cell_index in self.energy_cells
         ):
@@ -306,7 +412,15 @@ class EnergyEstimatorBank(EstimatorBank):
         consistent", so this is a moment of a fitted density and inherits every
         caveat attached to that fit.
         """
-        return self.ebm(2).moments().mean
+        mean = self.ebm(2).moments().mean
+        if self.ebm_config.location == "profiled":
+            # The density was fitted to centred residuals; the location lives
+            # in the residual mean instead.
+            mean += float(self.residual_mean)
+        elif self.ebm_config.location == "amortized":
+            # The density was refitted to y - location - x_hat_1.
+            mean += float(self.location)
+        return mean
 
     @torch.no_grad()
     def density_moments(self) -> dict[int, DensityMoments]:

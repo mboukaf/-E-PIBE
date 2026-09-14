@@ -162,6 +162,10 @@ class PIBETrainer:
     def after_step(self, phase: Any) -> None:
         """Hook run after every optimizer step; a no-op for PIBE."""
 
+    def measurement_for_step(self, y: torch.Tensor) -> torch.Tensor:
+        """The minibatch measurement a step trains on; the identity for PIBE."""
+        return y
+
     # ------------------------------------------------------------------
     # outer loop
     # ------------------------------------------------------------------
@@ -388,7 +392,7 @@ class PIBETrainer:
     ) -> StepResult:
         """One optimizer step (lines 4-15)."""
         index = self.batcher.sample()
-        y = self.train_data.y[index]
+        y = self.measurement_for_step(self.train_data.y[index])
         mode = self.phase_mode(phase)
 
         outputs = self.bank(
