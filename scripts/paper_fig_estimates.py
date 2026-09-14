@@ -69,12 +69,13 @@ if str(REPO_ROOT / "src") not in sys.path:
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
-import matplotlib.patheffects as pe  # noqa: E402
 import numpy as np  # noqa: E402
 import torch  # noqa: E402
 
 from pibe.config import RunConfig  # noqa: E402
+from pibe.data.disturbance import BasisDisturbance  # noqa: E402
 from pibe.data.noise import NOISE_FAMILIES, build_noise_model  # noqa: E402
+from pibe.data.simulate import rk4_integrate  # noqa: E402
 from pibe.experiment import build_experiment  # noqa: E402
 from pibe.training.callbacks import load_checkpoint, resolve_checkpoint  # noqa: E402
 from pibe.utils.logging import setup_logging  # noqa: E402
@@ -85,8 +86,13 @@ from pibe.utils.seeding import make_generator  # noqa: E402
 # Validated as a categorical triple -- worst all-pairs normal-vision dE 19.9,
 # worst protan dE 8.0 (orange against green), which is at the floor and so
 # obliges the dash patterns below as secondary encoding.
-TRUTH, ESTIMATE1,ESTIMATE2 = "#2c6ab1", "#ff6c27","#337b3e",
+TRUTH, ESTIMATE1,ESTIMATE2 = "#2c6ab1", "#ff6c27","#858582",
 INK, INK_SOFT = "#0b0b0b", "#52514e"
+# The measurement is the estimator's input, not one of its results.  It is kept
+# pale and hairline-thin so it reads as the scatter the panel is reconstructed
+# from rather than as a fourth series: with ESTIMATE2 currently grey too, weight
+# and lightness are what separate the two, so do not thicken this one.
+MEASURED = "#bdbcb8"
 
 # Dash patterns are load-bearing here, not decoration: in greyscale the blue and
 # the green converge (L 98 against 103 of 255), and in protan vision the orange
@@ -94,12 +100,6 @@ INK, INK_SOFT = "#0b0b0b", "#52514e"
 # dash against a fine dot.
 DASH_CLEAN = (0, (4.5, 2.2))
 DASH_NOISY = (0, (1.3, 2.3))
-
-# Where the noise costs little the two estimates coincide almost exactly, and a
-# dotted curve laid straight onto a dashed one reads as a single accidental
-# dash-dot line.  A thin surface-coloured ring under the top curve keeps the two
-# separable exactly where they overlap, which is where it matters.
-HALO = [pe.withStroke(linewidth=3.4, foreground="white")]
 
 
 def paper_style(base: float, serif: bool) -> None:
@@ -179,6 +179,54 @@ def measure(data, config, experiment, sigma: float | None, seed: int,
     return data.x[..., 0] + omega, sigma, noise
 
 
+def fine_measurement(experiment, data, index, law, dt: float, seed: int):
+    r"""One trajectory's measurement on a grid ``dt`` fine, agreeing with the data grid.
+
+    The estimator is fixed to :math:`N` samples at the data grid's
+    :math:`\Delta t`, so a denser trace must not be drawn as though it were the
+    input.  This keeps the two consistent instead: the state is re-integrated on
+    the fine grid, one noise realization is drawn there, and the data grid is
+    recovered by *subsampling that same realization*.  The :math:`N` points the
+    bank consumes are therefore a strict subset of the curve on the page ---
+    every marker lies exactly on the trace --- rather than an independent draw
+    that would merely look compatible.
+
+    Requires the fine grid to contain the data grid, i.e. the horizon to divide
+    into a whole number of strides; anything else would put the markers off the
+    curve.
+    """
+    horizon = float(data.t[-1])
+    n_data = data.t.numel()
+    steps = int(round(horizon / dt))
+    if steps % (n_data - 1) != 0:
+        raise SystemExit(
+            f"--fine-dt {dt:g} does not divide the data grid: {steps} fine steps "
+            f"over {n_data - 1} data intervals. Pick a dt with "
+            f"{horizon:g}/dt a multiple of {n_data - 1}."
+        )
+    stride = steps // (n_data - 1)
+    if data.coefficients is None:
+        raise SystemExit("the dataset carries no disturbance coefficients, so the "
+                         "trajectory cannot be re-integrated; use --fine-dt 0")
+
+    t_fine = torch.linspace(0.0, horizon, steps + 1,
+                            dtype=data.t.dtype, device=data.t.device)
+    x_fine = rk4_integrate(
+        experiment.system, t_fine, data.x[index:index + 1, 0, :],
+        data.theta[index],
+        BasisDisturbance(experiment.basis, data.coefficients[index]),
+        substeps=8,
+    )
+    x1 = x_fine[0, :, 0]
+    omega = law.sample((steps + 1,), generator=make_generator(seed),
+                       dtype=data.t.dtype).to(data.t.device)
+    y_fine = x1 + omega
+    # The re-integration is a second numerical solve of the same problem, so it
+    # is checked against the stored trajectory rather than trusted.
+    drift = float((x1[::stride] - data.x[index, :, 0]).abs().max())
+    return t_fine, y_fine, stride, drift
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run", type=Path, default=Path("outputs/big_w10_v2_s1"))
@@ -206,13 +254,22 @@ def main() -> int:
                              "of the family. Shifts a symmetric law bodily, "
                              "which is a different thing from the mixture's own "
                              "asymmetry.")
+    parser.add_argument("--fine-dt", type=float, default=0.001,
+                        help="draw the measured output on a grid this fine, the "
+                             "data grid being a subsample of it. 0 draws the "
+                             "data grid only.")
+    parser.add_argument("--no-output", dest="output", action="store_false",
+                        help="drop the measured-output panel, leaving x2, x3 "
+                             "and d only")
     parser.add_argument("--no-noise-free", dest="noise_free", action="store_false",
                         help="draw only the noisy estimate, not the sigma = 0 "
                              "reference")
     parser.add_argument("--noise-seed", type=int, default=909)
     parser.add_argument("--width", type=float, default=7.0,
                         help="inches; 7.0 is Elsevier full width, 3.4 single column")
-    parser.add_argument("--height", type=float, default=4.8)
+    parser.add_argument("--height", type=float, default=None,
+                        help="inches; defaults to 6.0 with the output panel, "
+                             "4.8 without")
     parser.add_argument("--fontsize", type=float, default=9.0)
     parser.add_argument("--sans", action="store_true",
                         help="sans-serif instead of serif")
@@ -221,6 +278,8 @@ def main() -> int:
     parser.add_argument("--out", type=Path, default=None)
     args = parser.parse_args()
     setup_logging("WARNING")
+    if args.height is None:
+        args.height = 6.0 if args.output else 4.8
     paper_style(args.fontsize, serif=not args.sans)
 
     config = RunConfig.from_yaml(args.run / "config.resolved.yaml")
@@ -235,22 +294,44 @@ def main() -> int:
     noisy, sigma, law = measure(data, config, experiment, args.sigma,
                                 args.noise_seed, args.noise_family,
                                 noise_arguments(args.noise_arg), args.bias)
+    # A denser realization of the same law for the panel, with the displayed
+    # trajectory's measurement replaced by its subsample, so the estimate shown
+    # is the one produced by exactly the samples drawn on the page.
+    fine = None
+    if args.output and args.fine_dt and args.fine_dt > 0 and sigma > 0:
+        law_for_trace = law if law is not None else build_noise_model(
+            config.data.noise_family, sigma,
+            truncation_sigmas=config.data.noise_truncation_sigmas,
+        )
+        t_fine, y_fine, stride, drift = fine_measurement(
+            experiment, data, index, law_for_trace, args.fine_dt, args.noise_seed)
+        noisy = noisy.clone()
+        noisy[index] = y_fine[::stride]
+        fine = (t_fine.cpu().numpy(), y_fine.cpu().numpy(), stride, drift)
+
     with torch.no_grad():
         est_noisy = experiment.bank.estimate(noisy, data.t, experiment.t_coll)
         if args.noise_free:
             clean, *_ = measure(data, config, experiment, 0.0, args.noise_seed)
             est_clean = experiment.bank.estimate(clean, data.t, experiment.t_coll)
 
+    # Panel j reads state column ``panel_columns[j]``, or the disturbance when
+    # that entry is None.  The measured coordinate x_1 leads when the output
+    # panel is on, so adding or dropping it shifts nothing else.
+    panel_columns = ([0] if args.output else []) + [1, 2, None]
+
     def pick(est, j):
-        """Panel j of an estimate: the two unmeasured states, then d."""
-        return (est.d[index] if j == 2 else est.x[index, :, j + 1]).cpu().numpy()
+        """Panel j of an estimate."""
+        column = panel_columns[j]
+        value = est.d[index] if column is None else est.x[index, :, column]
+        return value.cpu().numpy()
 
     t = data.t.cpu().numpy()
-    truths = [data.x[index, :, 1].cpu().numpy(),
-              data.x[index, :, 2].cpu().numpy(),
-              data.d[index].cpu().numpy()]
-    labels = [r"$x_2$", r"$x_3$", r"$d$"]
-    names = ["x2", "x3", "d "]
+    truths = [(data.d[index] if c is None else data.x[index, :, c]).cpu().numpy()
+              for c in panel_columns]
+    labels = [(r"$d$" if c is None else rf"$x_{{{c + 1}}}$") for c in panel_columns]
+    names = [("d " if c is None else f"x{c + 1}") for c in panel_columns]
+    measured = noisy[index].cpu().numpy()
 
     # Series drawn back to front: the noisy estimate sits on top, since it is the
     # curve the figure is about.
@@ -269,15 +350,33 @@ def main() -> int:
         series.append(("estimated", "estimated", ESTIMATE1, DASH_CLEAN, 1.4, 4))
     estimates = ([est_clean] if args.noise_free else []) + [est_noisy]
 
-    fig, axes = plt.subplots(3, 1, figsize=(args.width, args.height), sharex=True,
+    fig, axes = plt.subplots(len(panel_columns), 1,
+                             figsize=(args.width, args.height), sharex=True,
                              gridspec_kw={"hspace": 0.16})
     for j, ax in enumerate(axes):
+        if args.output and j == 0:
+            # Drawn first and underneath: on this panel the clean output is the
+            # blue truth, so the noisy trace has to read as the scatter around
+            # it rather than as a series competing with it.
+            if fine is None:
+                ax.plot(t, measured, color=MEASURED, lw=0.7, alpha=0.8, zorder=1,
+                        label=r"Noisy output $y$")
+            else:
+                t_fine, y_fine, stride, _ = fine
+                ax.plot(t_fine, y_fine, color=MEASURED, lw=0.35, alpha=0.85,
+                        zorder=1,
+                        label=rf"$y$,  $\Delta t$ = {args.fine_dt:g}")
+                # The markers are the estimator's actual input; they sit on the
+                # trace by construction, which is the point of drawing both.
+                ax.plot(t, y_fine[::stride], ls="none", marker="o", ms=2.0,
+                        markerfacecolor="none", markeredgecolor=MEASURED,
+                        markeredgewidth=0.7, alpha=0.95, zorder=2,
+                        label=rf"sampled,  $\Delta t$ = {t[1] - t[0]:g}")
         ax.plot(t, truths[j], color=TRUTH, lw=2, zorder=2,
-                label="true" if j == 0 else None)
-        for est, (name, _, colour, dash, lw, z) in zip(estimates, series):
+                label="True" if j == 0 else None)
+        for i, (est, (name, _, colour, dash, lw, z)) in enumerate(zip(estimates, series)):
             ax.plot(t, pick(est, j), color=colour, ls=dash, lw=2, zorder=z,
-                    label=name if j == 0 else None,
-                    path_effects=HALO if z == 4 and len(series) > 1 else None)
+                    label="EPIBE" if i == 0 else "PIBE")
         ax.set_ylabel(labels[j])
         if args.annotate:
             text = "   ".join(
@@ -290,7 +389,9 @@ def main() -> int:
     axes[-1].set_xlabel(r"$t$  [s]")
     axes[-1].set_xlim(t[0], t[-1])
     axes[0].legend(loc="lower center", bbox_to_anchor=(0.5, 1.02),
-                   ncol=1 + len(series), columnspacing=2.0, handlelength=2.8)
+                   ncol=1 + len(series) + (1 if args.output else 0)
+                   + (1 if fine is not None else 0),
+                   columnspacing=1.8, handlelength=2.6)
     fig.tight_layout(rect=(0, 0, 1, 0.965), pad=0.4)
 
     stem = "paper_estimates" + ("_cmp" if args.noise_free else "")
@@ -316,6 +417,10 @@ def main() -> int:
     plt.close(fig)
 
     print(f"run        : {args.run.name}, held-out trajectory {index}")
+    if fine is not None:
+        print(f"fine trace : {len(fine[0])} samples at dt = {args.fine_dt:g}, "
+              f"stride {fine[2]} to the data grid; re-integration agrees with "
+              f"the stored trajectory to {fine[3]:.2e}")
     print(f"noisy      : sigma = {sigma:g}"
           + ("  (as trained)" if args.sigma is None
              else f"  (re-measured; trained at {config.data.noise_sigma:g})"))
