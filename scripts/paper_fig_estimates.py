@@ -86,7 +86,7 @@ from pibe.utils.seeding import make_generator  # noqa: E402
 # Validated as a categorical triple -- worst all-pairs normal-vision dE 19.9,
 # worst protan dE 8.0 (orange against green), which is at the floor and so
 # obliges the dash patterns below as secondary encoding.
-TRUTH, ESTIMATE1,ESTIMATE2 = "#2c6ab1", "#ff6c27","#858582",
+TRUTH, ESTIMATE1,ESTIMATE2 = "#2c6ab1", "#ff6c27","#577C4F",
 INK, INK_SOFT = "#0b0b0b", "#52514e"
 # The measurement is the estimator's input, not one of its results.  It is kept
 # pale and hairline-thin so it reads as the scatter the panel is reconstructed
@@ -357,21 +357,14 @@ def main() -> int:
         if args.output and j == 0:
             # Drawn first and underneath: on this panel the clean output is the
             # blue truth, so the noisy trace has to read as the scatter around
-            # it rather than as a series competing with it.
+            # it rather than as a series competing with it.  The fine trace is
+            # drawn when there is one; the data-grid samples are not marked.
             if fine is None:
                 ax.plot(t, measured, color=MEASURED, lw=0.7, alpha=0.8, zorder=1,
-                        label=r"Noisy output $y$")
+                        label=r"$y$")
             else:
-                t_fine, y_fine, stride, _ = fine
-                ax.plot(t_fine, y_fine, color=MEASURED, lw=0.35, alpha=0.85,
-                        zorder=1,
-                        label=rf"$y$,  $\Delta t$ = {args.fine_dt:g}")
-                # The markers are the estimator's actual input; they sit on the
-                # trace by construction, which is the point of drawing both.
-                ax.plot(t, y_fine[::stride], ls="none", marker="o", ms=2.0,
-                        markerfacecolor="none", markeredgecolor=MEASURED,
-                        markeredgewidth=0.7, alpha=0.95, zorder=2,
-                        label=rf"sampled,  $\Delta t$ = {t[1] - t[0]:g}")
+                ax.plot(fine[0], fine[1], color=MEASURED, lw=0.35, alpha=0.85,
+                        zorder=1, label=r"$y$")
         ax.plot(t, truths[j], color=TRUTH, lw=2, zorder=2,
                 label="True" if j == 0 else None)
         for i, (est, (name, _, colour, dash, lw, z)) in enumerate(zip(estimates, series)):
@@ -389,8 +382,7 @@ def main() -> int:
     axes[-1].set_xlabel(r"$t$  [s]")
     axes[-1].set_xlim(t[0], t[-1])
     axes[0].legend(loc="lower center", bbox_to_anchor=(0.5, 1.02),
-                   ncol=1 + len(series) + (1 if args.output else 0)
-                   + (1 if fine is not None else 0),
+                   ncol=1 + len(series) + (1 if args.output else 0),
                    columnspacing=1.8, handlelength=2.6)
     fig.tight_layout(rect=(0, 0, 1, 0.965), pad=0.4)
 

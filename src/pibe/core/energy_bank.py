@@ -56,13 +56,14 @@ PINN parameters only, and :meth:`ebm_parameters` /
 from __future__ import annotations
 
 from collections.abc import Iterator
+from dataclasses import replace
 
 import torch
 from torch import Tensor, nn
 
 from pibe.basis.base import DisturbanceBasis
 from pibe.config import ArchitectureConfig, EBMConfig
-from pibe.core.bank import EstimatorBank
+from pibe.core.bank import EstimatorBank, Mode
 from pibe.core.cell import CellOutput
 from pibe.core.losses import CellLoss, data_loss, local_loss, physics_loss
 from pibe.core.residuals import final_residual, state_residual
@@ -156,6 +157,20 @@ class EnergyEstimatorBank(EstimatorBank):
         # produced residuals worth fitting.
         self.use_energy = False
 
+        # Optional global shift of x_hat^2_1, see EBMConfig.offset_parameter.
+        # Registered only when requested so existing checkpoints load unchanged.
+        if self.ebm_config.offset_parameter:
+            self.offset = nn.Parameter(torch.zeros((), dtype=dtype))
+        else:
+            self.offset = None
+        # Running mean of the first cell's raw residual.  Under a profiled
+        # location the density never sees it, so it is what carries the
+        # location into mu_omega_hat.
+        self.register_buffer(
+            "residual_mean", torch.zeros((), dtype=dtype),
+            persistent=self.ebm_config.location == "profiled",
+        )
+
     # ------------------------------------------------------------------
     # structure
     # ------------------------------------------------------------------
@@ -202,6 +217,34 @@ class EnergyEstimatorBank(EstimatorBank):
         bound = self.ebm_config.weight_bound if weight_bound is None else weight_bound
         for k in self.cell_indices:
             self.ebm(k).project(bound)
+
+    # ------------------------------------------------------------------
+    # forward
+    # ------------------------------------------------------------------
+
+    def forward(self, target_cell, y, t_data, t_coll, mode=Mode.GLOBAL,
+                need_derivative=True, create_graph=True):
+        """The inherited chain, with the optional global offset added to x_hat^2_1.
+
+        The offset is constant in time, so the derivative is unchanged.  Cell 3
+        onwards never reads x_hat^2_1 as an encoder input, so shifting it after
+        the chain has run is identical to shifting it inside.
+        """
+        outputs = super().forward(
+            target_cell, y, t_data, t_coll, mode=mode,
+            need_derivative=need_derivative, create_graph=create_graph,
+        )
+        if self.offset is not None:
+            shift = self.offset
+            if mode is Mode.LOCAL and target_cell != 2:
+                shift = shift.detach()
+            first = outputs[2]
+            outputs[2] = replace(
+                first,
+                x_prev_data=first.x_prev_data + shift,
+                x_prev_coll=first.x_prev_coll + shift,
+            )
+        return outputs
 
     # ------------------------------------------------------------------
     # residuals and losses
@@ -265,7 +308,17 @@ class EnergyEstimatorBank(EstimatorBank):
             )
 
         if self.uses_energy_at(cell_index):
-            data = self.ebm(cell_index).negative_log_likelihood(target - prediction)
+            residual = target - prediction
+            model = self.ebm(cell_index)
+            if cell_index == 2:
+                if self.training:
+                    with torch.no_grad():
+                        self.residual_mean.mul_(0.99).add_(0.01 * residual.mean())
+                if self.ebm_config.location == "profiled":
+                    residual = residual - residual.mean()
+            data = model.negative_log_likelihood(residual)
+            if cell_index == 2 and self.ebm_config.nll_scale == "variance":
+                data = data * model.moments().std ** 2
         elif (
             self.ebm_config.centered_warmup and cell_index in self.energy_cells
         ):
@@ -306,7 +359,12 @@ class EnergyEstimatorBank(EstimatorBank):
         consistent", so this is a moment of a fitted density and inherits every
         caveat attached to that fit.
         """
-        return self.ebm(2).moments().mean
+        mean = self.ebm(2).moments().mean
+        if self.ebm_config.location == "profiled":
+            # The density was fitted to centred residuals; the location lives
+            # in the residual mean instead.
+            mean += float(self.residual_mean)
+        return mean
 
     @torch.no_grad()
     def density_moments(self) -> dict[int, DensityMoments]:

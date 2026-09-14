@@ -103,12 +103,23 @@ class EPIBETrainer(PIBETrainer):
             groups.append({"params": pinn, "lr": pinn_lr})
         if ebm:
             groups.append({"params": ebm, "lr": ebm_lr})
+        # The global offset moves only end to end: in a local phase the cell's
+        # own new coordinate absorbs any shift, so there is nothing to learn.
+        offset = self.bank.offset
+        extra: list[torch.nn.Parameter] = []
+        if offset is not None:
+            offset.requires_grad_(phase is Phase.GLOBAL)
+            if phase is Phase.GLOBAL:
+                lr = self.ebm_config.lr_offset
+                groups.append({"params": [offset],
+                               "lr": self.config.lr_global if lr is None else lr})
+                extra = [offset]
 
         logger.debug(
             "cell %d entering %s: %d PINN tensors, %d EBM tensors, energy=%s",
             cell_index, phase.value, len(pinn), len(ebm), self.bank.use_energy,
         )
-        return pinn + ebm, groups
+        return pinn + ebm + extra, groups
 
     def phase_mode(self, phase: Phase) -> Mode:
         """Warm-up and local both evaluate the bank with upstream detached."""

@@ -405,6 +405,26 @@ class EBMConfig:
         Learning rate for the EBM parameters; defaults to ``lr_local``.  Kept
         separate because the energy and the PINN are fitted to each other and
         tolerate very different step sizes.
+    location
+        ``"free"`` (default) scores the first cell's residual as it is, so the
+        density must *move* for :math:`\hat x^2_1` to move.  ``"profiled"``
+        subtracts the minibatch mean of the residual before the energy sees it:
+        the density then models the shape only, the data term is exactly
+        invariant to a common shift of :math:`\hat x^2_1`, and the location is
+        left to the physics with no lagging density opposing it.
+        :math:`\hat\mu_\omega` becomes that mean plus the density's own mean.
+    offset_parameter
+        Add one scalar, shared by every trajectory, to :math:`\hat x^2_1`, and
+        train it in the end-to-end phases only.  The degenerate direction is
+        then a single coordinate with its own Adam scaling, instead of a
+        coordinated move of every decoder weight.
+    lr_offset
+        Learning rate for that scalar; defaults to ``lr_global``.
+    nll_scale
+        ``"variance"`` multiplies the first cell's negative log-likelihood by
+        the learned density's variance (detached), which restores PIBE's
+        gradient scale for a Gaussian residual; ``"none"`` leaves Eq. (53) as
+        written.
     """
 
     enabled: bool = False
@@ -425,6 +445,10 @@ class EBMConfig:
     n_ebm: int = 1000
     n_fit: int = 0
     lr_ebm: float | None = None
+    location: str = "free"
+    offset_parameter: bool = False
+    lr_offset: float | None = None
+    nll_scale: str = "none"
 
     def __post_init__(self) -> None:
         # YAML gives lists; the dataclass stores hashable tuples, as
@@ -441,6 +465,10 @@ class EBMConfig:
             raise ValueError("the quadrature needs at least two nodes")
         if self.n_fit < 0:
             raise ValueError(f"n_fit must be non-negative, got {self.n_fit}")
+        if self.location not in ("free", "profiled"):
+            raise ValueError(f"location must be 'free' or 'profiled', got {self.location!r}")
+        if self.nll_scale not in ("none", "variance"):
+            raise ValueError(f"nll_scale must be 'none' or 'variance', got {self.nll_scale!r}")
         if not 0 < self.n_ebm < n_par:
             raise ValueError(
                 f"Remark 5 requires 0 < n_ebm < n_par < n_total, got "
