@@ -150,31 +150,122 @@ class EPIBETrainer(PIBETrainer):
         return y - (lo + (hi - lo) * unit).to(y.device)
 
     def train(self):
-        """Algorithm 2; under the amortized location, then amortization and location search."""
-        history = super().train()
+        """Algorithm 2; under the amortized location, then amortization and location search.
+
+        The stages after Algorithm 2 are resumable, like Algorithm 2 itself.
+        Each completed stage is recorded in ``stages.json`` next to the
+        training state with the bank's weights at that point; offset training
+        also checkpoints mid-stage, and every scored offset is cached, so a
+        requeued job loses at most one checkpoint interval.
+        """
         cfg = self.ebm_config
-        if cfg.location == "amortized":
-            self.amortize()
-            first = self.locate()
-            if cfg.recenter_iters > 0:
-                # A true offset near the edge of the prior window sits where the
-                # amortized bank is least accurate.  Re-amortize on a window of
-                # the same width centred on the first estimate -- the width is
-                # kept because the spread of offsets itself regularizes the bank
-                # (a narrow window, or a fine-tune at a single offset, measurably
-                # loses accuracy) -- and search again, this time only the fine
-                # pass around the first estimate.
-                half = 0.5 * (cfg.offset_window[1] - cfg.offset_window[0])
-                prior = list(cfg.offset_window)
-                cfg.offset_window = [first - half, first + half]
-                try:
-                    self.amortize(iterations=cfg.recenter_iters)
-                    self.locate(centre=first)
-                finally:
-                    cfg.offset_window = prior
+        if cfg.location != "amortized":
+            return super().train()
+
+        record = self._load_stages()
+        if "algorithm2" in record["done"]:
+            # resume() brings back the history Algorithm 2 recorded; the weights
+            # it loads are then replaced by those of the last finished stage.
+            self.resume()
+            self._restore_stage_bank()
+            logger.info("resuming after Algorithm 2 (stages done: %s)", ", ".join(record["done"]))
+            history = self.history
+        else:
+            history = super().train()
+            self._finish_stage(record, "algorithm2")
+
+        if "amortize" not in record["done"]:
+            self.amortize(stage="amortize")
+            self._finish_stage(record, "amortize")
+
+        if "locate" not in record["done"]:
+            record["first"] = self.locate(stage="locate", record=record)
+            self._finish_stage(record, "locate")
+        else:
+            self.bank.location.fill_(record["first"])
+        first = record["first"]
+
+        if cfg.recenter_iters > 0:
+            # A true offset near the edge of the prior window sits where the
+            # amortized bank is least accurate.  Re-amortize on a window of the
+            # same width centred on the first estimate -- the width is kept
+            # because the spread of offsets itself regularizes the bank (a
+            # narrow window, or a fine-tune at a single offset, measurably loses
+            # accuracy) -- and search again, only the fine pass around it.
+            half = 0.5 * (cfg.offset_window[1] - cfg.offset_window[0])
+            prior = list(cfg.offset_window)
+            cfg.offset_window = [first - half, first + half]
+            try:
+                if "recenter" not in record["done"]:
+                    self.amortize(iterations=cfg.recenter_iters, stage="recenter")
+                    self._finish_stage(record, "recenter")
+                if "relocate" not in record["done"]:
+                    record["final"] = self.locate(centre=first, stage="relocate", record=record)
+                    self._finish_stage(record, "relocate")
+                else:
+                    self.bank.location.fill_(record["final"])
+            finally:
+                cfg.offset_window = prior
         return history
 
-    def amortize(self, iterations: int | None = None) -> None:
+    # ------------------------------------------------------------------
+    # stage bookkeeping for the amortized location
+    # ------------------------------------------------------------------
+
+    def _stage_dir(self):
+        return None if self.checkpoint_path is None else self.checkpoint_path.parent
+
+    def _load_stages(self) -> dict:
+        import json
+
+        directory = self._stage_dir()
+        path = None if directory is None else directory / "stages.json"
+        if path is not None and path.exists():
+            return json.loads(path.read_text())
+        return {"done": [], "scores": {}}
+
+    def _save_stages(self, record: dict) -> None:
+        import json
+
+        directory = self._stage_dir()
+        if directory is None:
+            return
+        directory.mkdir(parents=True, exist_ok=True)
+        tmp = directory / "stages.json.tmp"
+        tmp.write_text(json.dumps(record, indent=1))
+        tmp.replace(directory / "stages.json")
+
+    def _finish_stage(self, record: dict, name: str) -> None:
+        directory = self._stage_dir()
+        if directory is not None:
+            tmp = directory / "stage_bank.pt.tmp"
+            torch.save({"state_dict": self.bank.state_dict()}, tmp)
+            tmp.replace(directory / "stage_bank.pt")
+            (directory / "stage_state.pt").unlink(missing_ok=True)
+        record["done"].append(name)
+        self._save_stages(record)
+        logger.info("stage '%s' complete", name)
+
+    def _restore_stage_bank(self) -> None:
+        directory = self._stage_dir()
+        payload = torch.load(directory / "stage_bank.pt", map_location="cpu", weights_only=False)
+        self.bank.load_state_dict(payload["state_dict"])
+        self.bank.to(device=self.train_data.x.device, dtype=self.train_data.x.dtype)
+
+    def _search_subset(self):
+        """The trajectories the offset search and density refit run on."""
+        data, k = self.train_data, self.ebm_config.offset_trajectories
+        if k is None or k >= len(data):
+            return data.y, data.t
+        generator = torch.Generator().manual_seed(int(self.config.seed))
+        index = torch.randperm(len(data), generator=generator)[:k].to(data.y.device)
+        return data.y[index], data.t
+
+    # ------------------------------------------------------------------
+    # amortization and location search
+    # ------------------------------------------------------------------
+
+    def amortize(self, iterations: int | None = None, stage: str = "amortize") -> None:
         r"""End-to-end fine-tuning on randomly offset measurements.
 
         Runs after Algorithm 2 has converged, on the final cell's global
@@ -194,11 +285,12 @@ class EPIBETrainer(PIBETrainer):
         iterations = cfg.amortize_iters if iterations is None else iterations
         if iterations <= 0:
             return
-        logger.info("amortization: %d end-to-end iterations on offsets in [%+.3f, %+.3f]",
-                    iterations, *cfg.offset_window)
+        logger.info("%s: %d end-to-end iterations on offsets in [%+.3f, %+.3f]",
+                    stage, iterations, *cfg.offset_window)
         active, groups = self.enter_phase(final, Phase.GLOBAL)
         # Only the PINNs move; the densities are refitted after the search.
-        groups = [g for g in groups if not any(p in set(self.bank.ebm_parameters_upto(final)) for p in g["params"])]
+        ebm_params = set(self.bank.ebm_parameters_upto(final))
+        groups = [g for g in groups if not any(p in ebm_params for p in g["params"])]
         self.bank.set_ebm_trainable_upto(final, False)
         if self.bank.offset is not None:
             self.bank.offset.requires_grad_(False)
@@ -206,23 +298,51 @@ class EPIBETrainer(PIBETrainer):
         params = [p for g in groups for p in g["params"]]
         optimizer = torch.optim.Adam(groups, weight_decay=self.config.weight_decay)
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=iterations)
+
+        begin = 0
+        directory = self._stage_dir()
+        state_path = None if directory is None else directory / "stage_state.pt"
+        if state_path is not None and state_path.exists():
+            state = torch.load(state_path, map_location="cpu", weights_only=False)
+            if state.get("stage") == stage:
+                self.bank.load_state_dict(state["state_dict"])
+                self.bank.to(device=self.train_data.x.device, dtype=self.train_data.x.dtype)
+                optimizer.load_state_dict(state["optimizer"])
+                scheduler.load_state_dict(state["scheduler"])
+                if state.get("generator") is not None and self.generator is not None:
+                    self.generator.set_state(state["generator"])
+                begin = int(state["iteration"]) + 1
+                logger.info("  resuming %s at iteration %d", stage, begin)
+
         self._amortizing = True
         self.bank.use_energy = False
         try:
-            for iteration in range(iterations):
+            for iteration in range(begin, iterations):
                 result = self.step(final, Phase.GLOBAL, optimizer, params)
                 scheduler.step()
                 if self.config.log_every > 0 and (
                     iteration % self.config.log_every == 0 or iteration == iterations - 1
                 ):
-                    logger.info("  amortize | i=%5d | obj=%.4e | data=%.4e | phys=%.4e | |g|=%.2e",
-                                iteration, result.objective, float(result.target.data),
+                    logger.info("  %s | i=%5d | obj=%.4e | data=%.4e | phys=%.4e | |g|=%.2e",
+                                stage, iteration, result.objective, float(result.target.data),
                                 float(result.target.physics), result.grad_norm)
+                every = self.config.checkpoint_every
+                if state_path is not None and every > 0 and (iteration + 1) % every == 0:
+                    tmp = state_path.with_suffix(".tmp")
+                    torch.save({
+                        "stage": stage, "iteration": iteration,
+                        "state_dict": self.bank.state_dict(),
+                        "optimizer": optimizer.state_dict(),
+                        "scheduler": scheduler.state_dict(),
+                        "generator": None if self.generator is None else self.generator.get_state(),
+                    }, tmp)
+                    tmp.replace(state_path)
         finally:
             self._amortizing = False
             self.bank.use_energy = True
 
-    def locate(self, centre: float | None = None) -> float:
+    def locate(self, centre: float | None = None, stage: str = "locate",
+               record: dict | None = None) -> float:
         r"""Select the sensor offset by profiling the physics over the prior window.
 
         The first cell's data term is fitted equally well at every candidate
@@ -230,25 +350,31 @@ class EPIBETrainer(PIBETrainer):
         is scored as configured by ``ebm.offset_score`` (see
         :mod:`pibe.eval.offset_shooting`), the minimizer is found by the
         two-pass search of :func:`~pibe.eval.offset_shooting.select_offset` and
-        stored as ``bank.location``, and the first
-        cell's density is then refitted to the residual that remains, so that
-        Eq. (54) reports location and shape together.
+        stored as ``bank.location``, and the first cell's density is then
+        refitted to the residual that remains, so that Eq. (54) reports location
+        and shape together.  Runs on :attr:`~pibe.config.EBMConfig.offset_trajectories`
+        training trajectories.
         """
         from pibe.eval.offset_shooting import select_offset
 
-        bank, data, cfg = self.bank, self.train_data, self.ebm_config
+        bank, cfg = self.bank, self.ebm_config
+        y, t = self._search_subset()
+        logger.info("%s: offset search on %d trajectories", stage, y.shape[0])
+        record = record if record is not None else {"done": [], "scores": {}}
+        cache = record["scores"].setdefault(stage, {})
         was_training = bank.training
         bank.eval()
         if cfg.offset_score == "shooting":
             best, _, _ = select_offset(
-                bank, data.y, data.t, self.t_coll, tuple(cfg.offset_window), cfg.offset_grid,
+                bank, y, t, self.t_coll, tuple(cfg.offset_window), cfg.offset_grid,
                 coarse_steps=cfg.offset_steps, fine_points=cfg.offset_fine,
                 fine_steps=cfg.offset_fine_steps, log=logger.info, centre=centre,
+                cache=cache, on_score=lambda _: self._save_stages(record),
             )
         else:
             offsets = torch.linspace(cfg.offset_window[0], cfg.offset_window[1],
-                                     cfg.offset_grid, dtype=data.y.dtype)
-            costs = [bank.chain_cost(data.y - float(c), data.t, self.t_coll, self.config.lam)
+                                     cfg.offset_grid, dtype=y.dtype)
+            costs = [bank.chain_cost(y - float(c), t, self.t_coll, self.config.lam)
                      for c in offsets]
             for c, cost in zip(offsets.tolist(), costs):
                 logger.info("  offset %+.4f | chain cost %.5e", c, cost)
@@ -259,9 +385,9 @@ class EPIBETrainer(PIBETrainer):
 
         if cfg.offset_refit > 0 and 2 in bank.energy_cells:
             with torch.no_grad():
-                outputs = bank(bank.final_index, data.y - bank.location, data.t, self.t_coll,
+                outputs = bank(bank.final_index, y - bank.location, t, self.t_coll,
                                mode=Mode.GLOBAL, need_derivative=False)
-                residual = (data.y - bank.location - outputs[2].x_prev_data).reshape(-1)
+                residual = (y - bank.location - outputs[2].x_prev_data).reshape(-1)
             model = bank.ebm(2)
             bank.set_ebm_trainable(2, True)
             lr = cfg.lr_ebm if cfg.lr_ebm is not None else self.config.lr_local

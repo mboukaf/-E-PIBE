@@ -138,9 +138,14 @@ def main() -> int:
     # Resume checkpoint lives beside the artifacts; its presence is what makes
     # a preempted cluster job continue instead of restarting.
     state_path = output_dir / "state.pt"
-    if args.no_resume and state_path.exists():
-        state_path.unlink()
-        logger.info("--no-resume: discarded %s", state_path)
+    # The amortized-location stages after Algorithm 2 keep their own resume
+    # files (see EPIBETrainer.train); they follow state.pt's lifecycle.
+    stage_files = [output_dir / name for name in ("stages.json", "stage_bank.pt", "stage_state.pt")]
+    if args.no_resume:
+        for path in [state_path, *stage_files]:
+            if path.exists():
+                path.unlink()
+                logger.info("--no-resume: discarded %s", path)
 
     trainer = experiment.make_trainer()
     trainer.checkpoint_path = state_path
@@ -237,6 +242,12 @@ def main() -> int:
     # it would make a re-submitted job exit immediately instead of retraining.
     if state_path.exists():
         state_path.unlink()
+    # Keep the offset search's record, under a name a resubmitted job ignores.
+    if stage_files[0].exists():
+        stage_files[0].replace(output_dir / "offset_search.json")
+    for path in stage_files[1:]:
+        if path.exists():
+            path.unlink()
     return 0
 
 

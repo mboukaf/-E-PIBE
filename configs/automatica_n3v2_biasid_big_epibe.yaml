@@ -1,0 +1,123 @@
+# EPIBE with the amortized sensor-offset location, cluster scale (Docs/EPIBE.md §10).
+#
+# The EPIBE arm of scripts/slurm/train_biasid.sbatch.  Data, network and
+# optimizer are identical to automatica_n3v2_biasid_big_pibe.yaml; see that file
+# for the equal-budget accounting (30000 final global + 20000 amortization +
+# 10000 re-centring here, 60000 final global there).
+#
+# The EBM and location settings are those validated at small scale in §10.4-10.5:
+#   * energy term on the measurement cell only, variance-scaled NLL, plain
+#     quadratic warm-up;
+#   * after Algorithm 2: amortization on offsets in the prior window
+#     [-0.25, 1.25], shooting search (13-point coarse grid at 150 refinement
+#     steps, 5-point fine pass at 600 steps), re-centred re-amortization, second
+#     fine pass, density refit.
+#
+# Changed for scale: the offset search runs on 128 training trajectories (the
+# offset is one shared scalar; the shooting fit's cost is linear in the count),
+# and amortization is longer (20000 / 10000 instead of 12000 / 6000) because
+# lr_global is 2e-4 here against 5e-4 in the small runs.
+#
+# All post-training stages are resumable (stages.json, stage_bank.pt,
+# stage_state.pt beside state.pt), so the job is safe to requeue.
+
+system:
+  name: automatica_n3v2_biasid
+  kwargs:
+    theta_seed: 0
+data:
+  n_trajectories: 2048
+  n_samples: 201
+  horizon: 20.0
+  substeps: 8
+  noise_sigma: 0.05
+  noise_truncation_sigmas: 3.0
+  noise_family: gaussian
+  noise_bias: 0.0
+  noise_bias_relative: false
+  train_fraction: 0.8
+  sample_disturbance_per_trajectory: true
+  sample_theta_per_trajectory: false
+  seed: 1
+basis:
+  kind: fourier
+  q: 3
+  omega: 1.2566370614359172
+  coeff_lo:
+  - -0.18
+  - -0.18
+  - -0.12
+  coeff_hi:
+  - 0.18
+  - 0.18
+  - 0.12
+  remainder_amplitude: 0.0
+  remainder_rate: 0.15
+architecture:
+  latent_dim: 128
+  encoder_hidden:
+  - 512
+  - 512
+  decoder_hidden:
+  - 256
+  - 256
+  - 256
+  head_hidden:
+  - 128
+  - 128
+  activation: tanh
+  time_fourier_features: 10
+  time_feature_scaling: true
+  saturation_limit: 4.0
+training:
+  n_total: 20000
+  n_par: 8000
+  final_global_iters: 30000
+  lam: 1.0
+  n_collocation: 401
+  batch_size: 32
+  lr_local: 0.001
+  lr_global: 0.0002
+  lr_schedule: cosine
+  weight_decay: 0.0
+  grad_clip: 1.0
+  log_every: 2000
+  checkpoint_every: 2000
+  seed: 0
+ebm:
+  enabled: true
+  beta: 1.0
+  hidden:
+  - 64
+  - 64
+  energy_bound: 12.0
+  spectral_norm: false
+  weight_bound: 10.0
+  panels: 64
+  nodes_per_panel: 16
+  radius: 1.2
+  cells:
+  - 2
+  n_ebm: 1000
+  n_fit: 800
+  lr_ebm: 0.002
+  centered_warmup: false
+  symmetric: false
+  nll_scale: variance
+  location: amortized
+  offset_window:
+  - -0.25
+  - 1.25
+  offset_grid: 13
+  offset_score: shooting
+  offset_steps: 150
+  offset_fine: 5
+  offset_fine_steps: 600
+  offset_trajectories: 128
+  amortize_iters: 20000
+  recenter_iters: 10000
+  offset_refit: 1000
+device: auto
+dtype: float64
+seed: 0
+output_dir: outputs/biasid_big_epibe

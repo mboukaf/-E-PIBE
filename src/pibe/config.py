@@ -443,6 +443,11 @@ class EBMConfig:
     amortize_iters
         End-to-end iterations on randomly offset measurements, run after
         Algorithm 2 and before the location search.
+    offset_trajectories
+        Size of the random subset of training trajectories the offset search
+        and the density refit run on; ``None`` uses all of them.  The offset is
+        one scalar shared by every trajectory, so a few hundred suffice, and the
+        shooting fit's cost grows linearly with the count.
     recenter_iters
         After the first search, re-amortize for this many iterations on a window
         of the same width centred on the estimate, then rerun the fine search.
@@ -494,6 +499,7 @@ class EBMConfig:
     offset_fine_steps: int = 600
     amortize_iters: int = 10000
     recenter_iters: int = 6000
+    offset_trajectories: int | None = None
     offset_refit: int = 1000
 
     def __post_init__(self) -> None:

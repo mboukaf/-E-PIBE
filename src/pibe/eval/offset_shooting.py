@@ -100,7 +100,8 @@ def shooting_cost(bank, y: Tensor, t_data: Tensor, t_coll: Tensor, offset: float
 
 def select_offset(bank, y: Tensor, t_data: Tensor, t_coll: Tensor, window: tuple[float, float],
                   grid: int, coarse_steps: int, fine_points: int, fine_steps: int,
-                  log=None, centre: float | None = None) -> tuple[float, list[tuple[float, float]], list[tuple[float, float]]]:
+                  log=None, centre: float | None = None, cache: dict | None = None,
+                  on_score=None) -> tuple[float, list[tuple[float, float]], list[tuple[float, float]]]:
     r"""Two-pass search for the offset minimizing :math:`J(\mu)`.
 
     A coarse grid with a short refinement finds the basin; ``fine_points``
@@ -118,14 +119,27 @@ def select_offset(bank, y: Tensor, t_data: Tensor, t_coll: Tensor, window: tuple
     towards the flatter side.
     """
     say = log or (lambda *args: None)
+    cache = {} if cache is None else cache
+
+    def score(c: float, steps: int, label: str) -> float:
+        # Keyed by pass and offset, so a resumed job skips what it has scored.
+        key = f"{label}:{c:.6f}"
+        if key in cache:
+            say("  %s offset %+.4f | misfit %.6e | (cached)", label, c, cache[key])
+            return cache[key]
+        cost, theta = shooting_cost(bank, y, t_data, t_coll, c, steps=steps)
+        cache[key] = cost
+        say("  %s offset %+.4f | misfit %.6e | theta %s", label, c, cost,
+            [round(v, 4) for v in theta.tolist()])
+        if on_score is not None:
+            on_score(cache)
+        return cost
+
     coarse = []
     if centre is None:
         offsets = torch.linspace(window[0], window[1], grid, dtype=y.dtype).tolist()
         for c in offsets:
-            cost, theta = shooting_cost(bank, y, t_data, t_coll, c, steps=coarse_steps)
-            coarse.append((c, cost))
-            say("  coarse offset %+.4f | misfit %.6e | theta %s", c, cost,
-                [round(v, 4) for v in theta.tolist()])
+            coarse.append((c, score(c, coarse_steps, "coarse")))
         centre = min(coarse, key=lambda r: r[1])[0]
     if fine_points < 3:
         return centre, coarse, []
@@ -133,10 +147,7 @@ def select_offset(bank, y: Tensor, t_data: Tensor, t_coll: Tensor, window: tuple
     lo, hi = max(window[0], centre - step), min(window[1], centre + step)
     fine = []
     for c in torch.linspace(lo, hi, fine_points, dtype=y.dtype).tolist():
-        cost, theta = shooting_cost(bank, y, t_data, t_coll, c, steps=fine_steps)
-        fine.append((c, cost))
-        say("  fine   offset %+.4f | misfit %.6e | theta %s", c, cost,
-            [round(v, 4) for v in theta.tolist()])
+        fine.append((c, score(c, fine_steps, "fine  ")))
     x = torch.tensor([r[0] for r in fine], dtype=torch.float64)
     j = torch.tensor([r[1] for r in fine], dtype=torch.float64)
     design = torch.stack([x ** 2, x, torch.ones_like(x)], dim=1)
